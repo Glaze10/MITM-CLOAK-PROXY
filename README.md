@@ -28,8 +28,8 @@ things you'd open Burp for.
 Needs Python 3.11+.
 
 ```bash
-git clone https://github.com/<you>/cloak
-cd cloak
+git clone https://github.com/Glaze10/MITM-CLOAK-PROXY.git
+cd MITM-CLOAK-PROXY
 pip install -r requirements.txt
 python -m cloakproxy
 ```
