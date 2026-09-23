@@ -1,0 +1,29 @@
+[project]
+name = "cloakproxy"
+version = "0.1.0"
+description = "Intercepting proxy whose upstream TLS looks like the real client"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+dependencies = [
+  "mitmproxy>=12.0",
+  "mitmcloak>=0.1.0",
+  "httpcloak>=1.7.0",
+  "tornado>=6.4",
+]
+
+[project.optional-dependencies]
+window = ["pywebview>=5.0"]
+
+[project.scripts]
+cloak = "cloakproxy.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["cloakproxy"]
+
+[tool.setuptools.package-data]
+cloakproxy = ["static/*"]
