@@ -35,7 +35,10 @@ python -m cloakproxy
 ```
 
 On Windows, `.\Cloak.ps1` does the same and builds the virtual environment on
-first run. `.\Cloak.ps1 -Shortcut` puts a Cloak shortcut on your Desktop.
+first run. It runs under `pythonw.exe`, so there's no console window behind the
+app; add `-Console` if you want the log in your terminal instead.
+`.\Cloak.ps1 -Shortcut` puts a shortcut on your Desktop that launches the
+interpreter directly — no shell, nothing flashing up.
 
 ## Using it
 
@@ -59,6 +62,15 @@ forgetting about it.
 | `auto` | mirrors the real client, falls back to the preset | default; correct for an app |
 | `mirror` | mirrors only, fails loudly if it can't | when the exact fingerprint matters |
 | `static` | always the chosen preset | when something upstream terminated the TLS first |
+
+In `auto`, the preset is only a fallback — the fingerprint follows whatever
+connected. The same proxy, three clients, three different handshakes upstream:
+
+```
+curl               t12d218h1_76e208dd3e22_…     TLS 1.2, HTTP/1.1
+Chrome 151         t13d1516h2_8daaf6152771_…    TLS 1.3, h2
+iOS Safari 18      t13d2013h2_a09f3c656075_…    TLS 1.3, h2
+```
 
 If you chain Cloak behind another proxy, use `static`: whatever is in front has
 already terminated the client's TLS, so there is no original handshake left to
