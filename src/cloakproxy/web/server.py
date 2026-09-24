@@ -14,9 +14,10 @@ from typing import Any, Optional
 import tornado.web
 import tornado.websocket
 
-from cloakproxy import har, projects
-from cloakproxy.proxy import ProxyManager
-from cloakproxy.recorder import detail, summarize
+from cloakproxy.core import filters
+from cloakproxy.storage import har, projects
+from cloakproxy.core.proxy import ProxyManager
+from cloakproxy.core.recorder import detail, summarize
 
 LOG = logging.getLogger("cloak")
 STATIC = Path(__file__).parent / "static"
@@ -80,20 +81,41 @@ class ProxyHandler(Base):
 
 
 class FlowsHandler(Base):
-    def get(self) -> None:
-        """The flow table. ``q`` filters on method, host, path or status."""
-        q = (self.get_argument("q", "") or "").strip().lower()
+    def _rows(self) -> list[dict]:
         rows = [summarize(f) for f in self.proxy.recorder.flows.values()]
         rows += list(self.imported.values())
-        if q:
-            def hit(r: dict) -> bool:
-                return (q in (r.get("url") or "").lower()
-                        or q in (r.get("method") or "").lower()
-                        or q in str(r.get("status") or "").lower()
-                        or q in (r.get("mime") or "").lower())
-            rows = [r for r in rows if hit(r)]
         rows.sort(key=lambda r: r.get("started") or 0)
-        self.send({"flows": rows[-2000:], "total": len(rows)})
+        return rows
+
+    def get(self) -> None:
+        """The flow table, narrowed by the quick box (`q`)."""
+        spec = {"text": self.get_argument("q", "")}
+        self._respond(spec)
+
+    def post(self) -> None:
+        """The same, narrowed by the filter dialog's full spec."""
+        self._respond(self.body_json())
+
+    def _respond(self, spec: dict) -> None:
+        f = filters.Filter(spec)
+        rows = [r for r in self._rows() if f.matches(r)]
+        if f.needs_bodies():          # body search costs a decode, so only on demand
+            keep = []
+            for r in rows:
+                flow = self.proxy.recorder.get(r["id"])
+                if flow is None:
+                    imported = self.imported.get(r["id"]) or {}
+                    req = ((imported.get("request") or {}).get("body") or {}).get("text", "")
+                    resp = ((imported.get("response") or {}).get("body") or {}).get("text", "")
+                else:
+                    d = detail(flow)
+                    req = (d["request"]["body"] or {}).get("text", "")
+                    resp = ((d.get("response") or {}).get("body") or {}).get("text", "")
+                if f.body_matches(req, resp):
+                    keep.append(r)
+            rows = keep
+        self.send({"flows": rows[-2000:], "total": len(rows),
+                   "filtered": f.active, "chips": f.describe()})
 
     def delete(self) -> None:
         self.proxy.recorder.clear()
@@ -128,11 +150,18 @@ class FlowHandler(Base):
             if ok and body.get("then_resume"):
                 rec.resume(flow_id)
         elif action == "replay":
-            ok = await self.proxy.replay(flow_id)
+            ok = bool(await self.proxy.replay(flow_id))
         else:
             self.send({"error": f"unknown action {action}"}, 400)
             return
         self.send({"ok": ok})
+
+
+class MarkHandler(Base):
+    def post(self) -> None:
+        body = self.body_json()
+        n = self.proxy.recorder.mark(body.get("ids") or [], body.get("colour", ""))
+        self.send({"ok": True, "marked": n})
 
 
 class InterceptHandler(Base):
@@ -153,8 +182,10 @@ class InterceptHandler(Base):
 
 class HarHandler(Base):
     def get(self) -> None:
-        """Download the current flows as a HAR."""
-        flows = list(self.proxy.recorder.flows.values())
+        """Download flows as a HAR — everything, or just the ids asked for."""
+        wanted = [i for i in (self.get_argument("ids", "") or "").split(",") if i]
+        store = self.proxy.recorder.flows
+        flows = [store[i] for i in wanted if i in store] if wanted else list(store.values())
         name = self.get_argument("name", "cloak.har")
         self.set_header("Content-Type", "application/json")
         self.set_header("Content-Disposition", f'attachment; filename="{name}"')
@@ -223,6 +254,51 @@ class CertHandler(Base):
         self.send({"dir": str(base), "pem": str(pem), "exists": pem.exists()})
 
 
+class RulesHandler(Base):
+    """Match & replace rules — read them, or replace the whole list."""
+
+    def get(self) -> None:
+        self.send({"rules": self.proxy.rules.list_rules()})
+
+    def post(self) -> None:
+        rules = self.proxy.rules.set_rules(self.body_json().get("rules") or [])
+        self.hub.emit("rules", {"count": len(rules)})
+        self.send({"ok": True, "rules": self.proxy.rules.list_rules()})
+
+
+class RepeaterHandler(Base):
+    """Send an edited copy of a flow and hand back the id of the new one."""
+
+    async def post(self) -> None:
+        b = self.body_json()
+        new_id = await self.proxy.send(b.get("id", ""), method=b.get("method", ""),
+                                       url=b.get("url", ""), headers=b.get("headers"),
+                                       body=b.get("body"))
+        if not new_id:
+            self.send({"error": "start the proxy first, or pick a flow"}, 400)
+            return
+        self.send({"ok": True, "id": new_id})
+
+
+class CloakHandler(Base):
+    """What the cloak is doing right now — mirrored vs preset, in its own words."""
+
+    def get(self) -> None:
+        stats = ""
+        master = self.proxy.master
+        if master is not None:
+            try:
+                stats = master.commands.call("mitmcloak.stats")
+            except Exception:  # pylint: disable=broad-except
+                stats = ""
+        mirrored = sum(1 for f in self.proxy.recorder.flows.values()
+                       if ((f.metadata or {}).get("mitmcloak") or {}).get("via") == "mirror")
+        presets = sum(1 for f in self.proxy.recorder.flows.values()
+                      if ((f.metadata or {}).get("mitmcloak") or {}).get("via") == "static")
+        self.send({"stats": stats, "mirrored": mirrored, "static": presets,
+                   "mode": self.proxy.mode, "preset": self.proxy.preset})
+
+
 class EventSocket(tornado.websocket.WebSocketHandler):
     def initialize(self, hub: Hub, proxy: ProxyManager) -> None:  # noqa: D102
         self.hub = hub
@@ -256,6 +332,10 @@ def make_app(proxy: ProxyManager, hub: Hub) -> tornado.web.Application:
             (r"/api/flows", FlowsHandler, common),
             (r"/api/flows/([^/]+)", FlowHandler, common),
             (r"/api/intercept", InterceptHandler, common),
+            (r"/api/mark", MarkHandler, common),
+            (r"/api/cloak", CloakHandler, common),
+            (r"/api/rules", RulesHandler, common),
+            (r"/api/repeater", RepeaterHandler, common),
             (r"/api/har", HarHandler, common),
             (r"/api/projects", ProjectsHandler, common),
             (r"/api/cert", CertHandler, common),

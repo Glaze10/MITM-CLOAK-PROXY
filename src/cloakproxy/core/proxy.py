@@ -13,7 +13,8 @@ from typing import Any, Callable, Optional
 from mitmproxy import options
 from mitmproxy.tools.dump import DumpMaster
 
-from cloakproxy.recorder import Recorder
+from cloakproxy.core.recorder import Recorder
+from cloakproxy.core.rules import MatchReplace
 
 LOG = logging.getLogger("cloak")
 
@@ -36,6 +37,7 @@ class ProxyManager:
     def __init__(self, emit: Callable[[str, dict], None]):
         self.emit = emit
         self.recorder = Recorder(emit)
+        self.rules = MatchReplace()
         self.master: Optional[DumpMaster] = None
         self._task: Optional[asyncio.Task] = None
         self.port = DEFAULT_PORT
@@ -78,7 +80,11 @@ class ProxyManager:
         self.master = DumpMaster(opts, with_termlog=False, with_dumper=False)
 
         from mitmcloak import Bridge  # pylint: disable=import-outside-toplevel
-        self.master.addons.add(Bridge(), self.recorder)
+        # Order matters. The cloak's bridge performs the upstream request itself, so
+        # a rewrite registered after it would be recorded as a "hit" and still go out
+        # unchanged. Rules first, then the bridge, then the recorder — which leaves
+        # history showing exactly what left the machine.
+        self.master.addons.add(self.rules, Bridge(), self.recorder)
         # the cloak's options only exist once its addon is loaded
         update: dict[str, Any] = {"mitmcloak_mode": self.mode,
                                   "mitmcloak_preset": self.preset}
@@ -121,12 +127,42 @@ class ProxyManager:
         self.emit("proxy", self.state())
         return self.state()
 
-    async def replay(self, flow_id: str) -> bool:
-        """Send a flow again — the Repeater move."""
+    async def replay(self, flow_id: str) -> Optional[str]:
+        """Send a flow again. Returns the new flow's id so the caller can watch it."""
         flow = self.recorder.get(flow_id)
         if flow is None or self.master is None:
-            return False
+            return None
         copy = flow.copy()
         copy.response = None
+        copy.id = copy.id if copy.id != flow.id else None or copy.id
         self.master.commands.call("replay.client", [copy])
-        return True
+        return copy.id
+
+    async def send(self, flow_id: str, *, method: str = "", url: str = "",
+                   headers: Optional[list] = None, body: Optional[str] = None
+                   ) -> Optional[str]:
+        """Repeater: send an edited copy, leaving the original untouched.
+
+        A copy rather than the flow itself, so the history keeps what really
+        happened and the tab keeps what you are experimenting with.
+        """
+        flow = self.recorder.get(flow_id)
+        if flow is None or self.master is None:
+            return None
+        copy = flow.copy()
+        copy.response = None
+        if method:
+            copy.request.method = method.strip().upper()
+        if url:
+            copy.request.url = url.strip()
+        if headers is not None:
+            copy.request.headers.clear()
+            for k, v in headers:
+                if k:
+                    copy.request.headers.add(k, v)
+        if body is not None:
+            copy.request.content = body.encode("utf-8")
+            if "content-length" in copy.request.headers:
+                copy.request.headers["content-length"] = str(len(copy.request.content))
+        self.master.commands.call("replay.client", [copy])
+        return copy.id

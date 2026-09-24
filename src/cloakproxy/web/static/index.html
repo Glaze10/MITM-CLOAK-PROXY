@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cloak</title>
+<link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+
+<!-- ── title bar: what the proxy is doing, always visible ─────────────────── -->
+<header class="titlebar">
+  <div class="brand">Cloak</div>
+
+  <div class="status" id="status">
+    <span class="dot" id="dot"></span>
+    <span id="statusText">stopped</span>
+  </div>
+
+  <div class="identity" id="identity" title="Which TLS identity goes upstream">
+    <span class="idLabel">upstream</span>
+    <span class="idValue" id="idValue">—</span>
+  </div>
+
+  <div class="spacer"></div>
+  <button id="btnIntercept" class="pill">Intercept: off</button>
+  <button id="btnToggle" class="primary">Start</button>
+</header>
+
+<!-- ── top tabs ───────────────────────────────────────────────────────────── -->
+<nav class="tabs top" id="topTabs">
+  <button data-tab="proxy" class="on">Proxy</button>
+  <button data-tab="repeater">Repeater</button>
+  <button data-tab="projects">Projects</button>
+  <button data-tab="settings">Settings</button>
+</nav>
+
+<main>
+  <!-- ══ PROXY ═══════════════════════════════════════════════════════════ -->
+  <section class="tabview on" data-view="proxy">
+    <nav class="tabs sub" data-subtabs="proxy">
+      <button data-sub="history" class="on">History <span class="badge" id="histCount">0</span></button>
+      <button data-sub="intercept">Intercept <span class="badge warn hidden" id="parkedCount">0</span></button>
+      <button data-sub="replace">Match &amp; Replace <span class="badge" id="rulesCount">0</span></button>
+      <button data-sub="settings">Proxy settings</button>
+    </nav>
+
+    <!-- ── history ─────────────────────────────────────────────────────── -->
+    <div class="subview on" data-sub="history">
+      <div class="toolbar">
+        <input id="quickFilter" class="grow" placeholder="Quick filter — host, path, method, status">
+        <button id="btnFilter">Filter…</button>
+        <span id="chips" class="chips"></span>
+        <span class="spacer"></span>
+        <span class="selinfo" id="selInfo"></span>
+        <button id="btnExport">Export HAR</button>
+        <button id="btnImport">Import HAR</button>
+        <button id="btnClear" class="danger">Clear</button>
+      </div>
+
+      <div class="split-v" id="historySplit">
+        <div class="pane-top" id="flowPane">
+          <table class="flows">
+            <thead><tr>
+              <th class="c-mark"></th><th class="c-method">Method</th><th class="c-host">Host</th>
+              <th>Path</th><th class="c-status">Status</th><th class="c-type">Type</th>
+              <th class="c-size">Size</th><th class="c-time">Time</th><th class="c-tls">TLS</th>
+            </tr></thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+
+        <div class="gutter-h" id="gutterH" title="Drag to resize"></div>
+
+        <div class="pane-bottom" id="detailPane">
+          <div class="split-h" id="detailSplit">
+            <div class="half" id="reqHalf">
+              <div class="halfbar">
+                <span>Request</span>
+                <span class="spacer"></span>
+                <button class="mini" data-copy="request">Copy</button>
+                <button class="mini" data-view-mode="pretty">Pretty</button>
+                <button class="mini" data-view-mode="raw">Raw</button>
+              </div>
+              <div class="halfbody" id="reqBody"><p class="empty">Pick a flow.</p></div>
+            </div>
+            <div class="gutter-v" id="gutterV" title="Drag to resize"></div>
+            <div class="half" id="resHalf">
+              <div class="halfbar">
+                <span>Response</span>
+                <span class="spacer"></span>
+                <button class="mini" data-copy="response">Copy</button>
+                <button class="mini" id="btnToRepeater">Send to Repeater</button>
+              </div>
+              <div class="halfbody" id="resBody"><p class="empty">—</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── intercept ───────────────────────────────────────────────────── -->
+    <div class="subview" data-sub="intercept">
+      <div class="toolbar">
+        <label class="switch"><input type="checkbox" id="interceptOn"> Intercept requests</label>
+        <input id="interceptFilter" class="grow" placeholder="Only URLs containing… (blank = everything)">
+        <span class="spacer"></span>
+        <button id="btnForwardAll">Forward all</button>
+        <button id="btnDropAll" class="danger">Drop all</button>
+      </div>
+      <div class="interceptBody">
+        <div class="queue">
+          <h3>Parked <span class="badge warn" id="queueCount">0</span></h3>
+          <ul id="queue" class="queue-list"></ul>
+        </div>
+        <div class="editor" id="interceptEditor">
+          <p class="empty">Nothing parked. Arm intercept, then make a request.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── match & replace ─────────────────────────────────────────────── -->
+    <div class="subview" data-sub="replace">
+      <div class="toolbar">
+        <button id="btnAddRule" class="primary">Add rule</button>
+        <span class="hint">Rules run in order, on every request or response that matches.</span>
+        <span class="spacer"></span>
+        <button id="btnSaveRules">Apply rules</button>
+      </div>
+      <div class="rules" id="rules"></div>
+    </div>
+
+    <!-- ── proxy settings ──────────────────────────────────────────────── -->
+    <div class="subview" data-sub="settings">
+      <div class="settings">
+        <section class="card">
+          <h3>Listener</h3>
+          <label class="field"><span>Proxy port</span><input id="setPort" type="number" min="1" max="65535"></label>
+          <label class="field"><span>Only these hosts</span>
+            <input id="setAllow" placeholder="comma separated, blank for all">
+          </label>
+          <p class="hint">Point the device's HTTP proxy at this machine's IP and that port.</p>
+        </section>
+
+        <section class="card" id="fingerprintCard">
+          <h3>Upstream TLS identity</h3>
+          <div class="choice" id="modeChoices">
+            <label><input type="radio" name="mode" value="auto">
+              <b>Mirror the client</b>
+              <small>Send upstream whatever the device's own handshake was. Right for an app
+                or a browser talking straight to Cloak.</small>
+            </label>
+            <label><input type="radio" name="mode" value="mirror">
+              <b>Mirror only</b>
+              <small>Same, but fail loudly rather than fall back. Use when the exact
+                fingerprint is the thing you're testing.</small>
+            </label>
+            <label><input type="radio" name="mode" value="static">
+              <b>Always use a preset</b>
+              <small>Ignore the client and present a chosen browser. Needed when something
+                in front of Cloak already terminated the TLS.</small>
+            </label>
+          </div>
+
+          <label class="field" id="presetField">
+            <span id="presetLabel">Preset</span>
+            <select id="setPreset"></select>
+          </label>
+          <p class="hint" id="presetHint"></p>
+
+          <div class="live" id="cloakLive">
+            <span class="stat"><b id="statMirrored">0</b> mirrored</span>
+            <span class="stat"><b id="statStatic">0</b> preset</span>
+          </div>
+        </section>
+
+        <section class="card">
+          <h3>Certificate</h3>
+          <p class="hint">The device has to trust Cloak's CA before HTTPS can be read.
+            Browse to <code>mitm.it</code> through the proxy, or download it here.</p>
+          <p class="hint" id="certPath">—</p>
+          <button id="btnCert">Download CA</button>
+        </section>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ REPEATER ════════════════════════════════════════════════════════ -->
+  <section class="tabview" data-view="repeater">
+    <nav class="tabs sub" id="repeaterTabs">
+      <span class="hint pad">Send a request here from History, then edit and resend it.</span>
+    </nav>
+    <div class="subview on" id="repeaterBody">
+      <p class="empty pad">Nothing here yet. In History, pick a flow and press
+        <b>Send to Repeater</b>.</p>
+    </div>
+  </section>
+
+  <!-- ══ PROJECTS ════════════════════════════════════════════════════════ -->
+  <section class="tabview" data-view="projects">
+    <div class="toolbar">
+      <input id="projectName" placeholder="Project name">
+      <button id="btnSaveProject" class="primary">Save current session</button>
+      <span class="spacer"></span>
+      <button id="btnRefreshProjects">Refresh</button>
+    </div>
+    <div class="projects" id="projectList"></div>
+  </section>
+
+  <!-- ══ SETTINGS ════════════════════════════════════════════════════════ -->
+  <section class="tabview" data-view="settings">
+    <div class="settings">
+      <section class="card">
+        <h3>Interface</h3>
+        <label class="field"><span>Rows kept in the table</span>
+          <input id="setMaxRows" type="number" value="2000" min="100" step="100"></label>
+        <label class="switch"><input type="checkbox" id="setAutoScroll" checked> Follow new traffic</label>
+        <label class="switch"><input type="checkbox" id="setPrettyDefault" checked> Pretty-print JSON by default</label>
+      </section>
+      <section class="card">
+        <h3>About</h3>
+        <p class="hint">Cloak — mitmproxy for decryption, mitmcloak for an upstream leg
+          that looks like the real client.</p>
+        <p class="hint" id="aboutVersions">—</p>
+      </section>
+    </div>
+  </section>
+</main>
+
+<!-- ── filter dialog ──────────────────────────────────────────────────────── -->
+<div class="modal hidden" id="filterModal">
+  <div class="modalBox">
+    <header><h3>Filter history</h3><button class="x" id="filterClose">✕</button></header>
+    <div class="modalBody">
+      <div class="grid2">
+        <fieldset><legend>Method</legend>
+          <div class="checks" id="fMethods">
+            <label><input type="checkbox" value="GET"> GET</label>
+            <label><input type="checkbox" value="POST"> POST</label>
+            <label><input type="checkbox" value="PUT"> PUT</label>
+            <label><input type="checkbox" value="PATCH"> PATCH</label>
+            <label><input type="checkbox" value="DELETE"> DELETE</label>
+            <label><input type="checkbox" value="OPTIONS"> OPTIONS</label>
+          </div>
+        </fieldset>
+        <fieldset><legend>Status</legend>
+          <div class="checks" id="fStatus">
+            <label><input type="checkbox" value="2"> 2xx</label>
+            <label><input type="checkbox" value="3"> 3xx</label>
+            <label><input type="checkbox" value="4"> 4xx</label>
+            <label><input type="checkbox" value="5"> 5xx</label>
+          </div>
+          <div class="row">
+            <input id="fStatusMin" type="number" placeholder="min" min="100" max="599">
+            <input id="fStatusMax" type="number" placeholder="max" min="100" max="599">
+          </div>
+        </fieldset>
+      </div>
+
+      <fieldset><legend>Match</legend>
+        <label class="field"><span>Host contains</span><input id="fHost"></label>
+        <label class="field"><span>Path contains</span><input id="fPath"></label>
+        <label class="field"><span>Type contains</span><input id="fMime" placeholder="json, html, image"></label>
+        <label class="field"><span>Body contains</span><input id="fBody" placeholder="searches request and response"></label>
+        <label class="field"><span>Hide URLs containing</span><input id="fExclude" placeholder="comma separated"></label>
+      </fieldset>
+
+      <fieldset><legend>Only show</legend>
+        <div class="checks">
+          <label><input type="checkbox" id="fNoise"> Hide images, fonts, CSS and JS</label>
+          <label><input type="checkbox" id="fHasBody"> With a response body</label>
+          <label><input type="checkbox" id="fPaused"> Parked by intercept</label>
+          <label><input type="checkbox" id="fMarked"> Highlighted</label>
+        </div>
+        <div class="checks" id="fColours"></div>
+      </fieldset>
+    </div>
+    <footer>
+      <button id="filterReset">Reset</button>
+      <span class="spacer"></span>
+      <button id="filterApply" class="primary">Apply</button>
+    </footer>
+  </div>
+</div>
+
+<!-- ── right-click menu ───────────────────────────────────────────────────── -->
+<div class="ctx hidden" id="ctx"></div>
+<div id="toast" class="toast hidden"></div>
+
+<script type="module" src="/static/js/main.js"></script>
+</body>
+</html>

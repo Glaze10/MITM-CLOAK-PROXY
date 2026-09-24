@@ -15,8 +15,8 @@ import webbrowser
 
 import tornado.web
 
-from cloakproxy.proxy import DEFAULT_MODE, DEFAULT_PORT, DEFAULT_PRESET, ProxyManager
-from cloakproxy.server import Hub, make_app
+from cloakproxy.core.proxy import DEFAULT_MODE, DEFAULT_PORT, DEFAULT_PRESET, ProxyManager
+from cloakproxy.web.server import Hub, make_app
 
 LOG = logging.getLogger("cloak")
 UI_HOST, UI_PORT = "127.0.0.1", 8099

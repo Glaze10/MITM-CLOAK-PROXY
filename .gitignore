@@ -1,5 +1,19 @@
+# environments
 .venv/
+env/
+
+# python
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# captures and sessions — yours, not the repo's
 *.har
 *.mitm
+CloakProjects/
+
+# editors
+.vscode/
+.idea/

@@ -24,7 +24,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 
 # ── find or build the environment ────────────────────────────────────────────
 function Resolve-Python {
@@ -55,7 +55,7 @@ if ($Shortcut) {
   # flashing up: a .ps1 needs a shell, and a shell needs a window
   $s.TargetPath = $Pyw
   $s.Arguments = "-m cloakproxy --port $Port --ui-port $UiPort --mode $Mode --preset $Preset"
-  $s.WorkingDirectory = $Root
+  $s.WorkingDirectory = (Join-Path $Root 'src')
   $s.IconLocation = "$env:SystemRoot\System32\netshell.dll,85"
   $s.Description = 'Cloak - intercepting proxy with a real browser TLS fingerprint'
   $s.WindowStyle = 7                  # minimised, in case a console ever appears
@@ -78,10 +78,10 @@ Write-Host "[cloak] proxy :$Port  ui http://127.0.0.1:$UiPort  mode=$Mode  prese
 
 if ($Console -or $NoWindow) {
   # attached: this terminal is the log
-  Push-Location $Root
+  Push-Location (Join-Path $Root 'src')
   try { & $Py @argv } finally { Pop-Location }
 } else {
   # detached: hand it to pythonw and let this shell go
-  Start-Process -FilePath $Pyw -ArgumentList $argv -WorkingDirectory $Root -WindowStyle Hidden
+  Start-Process -FilePath $Pyw -ArgumentList $argv -WorkingDirectory (Join-Path $Root 'src') -WindowStyle Hidden
   Write-Host '[cloak] running in the background - close the Cloak window to stop it' -ForegroundColor DarkGray
 }

@@ -67,6 +67,22 @@ def summarize(flow: http.HTTPFlow, *, state: str = "") -> dict[str, Any]:
         "replay": flow.is_replay or "",
         "comment": flow.comment or "",
         "marked": flow.marked or "",
+        # what the cloak actually presented upstream for THIS request, so the
+        # interface never has to guess which identity was used
+        "cloak": cloak_info(flow),
+    }
+
+
+def cloak_info(flow: http.HTTPFlow) -> dict[str, Any]:
+    """mitmcloak's own record of the upstream leg, if it handled this one."""
+    meta = (flow.metadata or {}).get("mitmcloak") or {}
+    if not meta:
+        return {}
+    return {
+        "via": meta.get("via", ""),          # "mirror" = the client's own handshake
+        "preset": meta.get("preset") or "",  # the identity used when it wasn't mirrored
+        "upstream": meta.get("upstream") or "",
+        "ms": meta.get("ms"),
     }
 
 
@@ -91,8 +107,7 @@ def detail(flow: http.HTTPFlow) -> dict[str, Any]:
         }
     d["error"] = flow.error.msg if flow.error else None
     # what the cloak actually presented upstream, when it says
-    d["tls"] = {k: v for k, v in (flow.metadata or {}).items()
-                if isinstance(k, str) and ("cloak" in k or "tls" in k or "ja" in k)}
+    d["cloak"] = cloak_info(flow)
     return d
 
 
@@ -116,6 +131,19 @@ class Recorder:
 
     def get(self, flow_id: str) -> Optional[http.HTTPFlow]:
         return self.flows.get(flow_id)
+
+    def mark(self, ids: list[str], colour: str) -> int:
+        """Highlight flows. mitmproxy keeps `marked` on the flow, so a colour
+        survives being written to a project and read back."""
+        n = 0
+        for fid in ids:
+            flow = self.flows.get(fid)
+            if flow is None:
+                continue
+            flow.marked = colour or ""
+            n += 1
+            self._emit("marked", summarize(flow))
+        return n
 
     def clear(self) -> None:
         self.flows.clear()
