@@ -31,6 +31,28 @@ def available_presets() -> list[str]:
         return [DEFAULT_PRESET]
 
 
+async def _wait_for_port(port: int, timeout: float = 5.0) -> bool:
+    """Poll until nothing answers on `port`, or give up.
+
+    A trial bind would lie here: mitmproxy's listener sets SO_REUSEADDR, and on
+    Windows that lets a second bind succeed while the first socket is still
+    accepting. Connecting is the honest question — if it refuses, the listener
+    really is gone.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while True:
+        try:
+            _, writer = await asyncio.wait_for(
+                asyncio.open_connection("127.0.0.1", port), timeout=0.5)
+            writer.close()
+        except (OSError, asyncio.TimeoutError):
+            return True
+        if loop.time() >= deadline:
+            return False
+        await asyncio.sleep(0.1)
+
+
 class ProxyManager:
     """Start/stop the proxy and own the flow store."""
 
@@ -66,9 +88,24 @@ class ProxyManager:
         }
 
     async def start(self, *, port: int = 0, mode: str = "", preset: str = "",
-                    allow_hosts: str = "") -> dict[str, Any]:
+                    allow_hosts: Optional[str] = None) -> dict[str, Any]:
+        """Start, or restart if the settings differ from what's already running.
+
+        allow_hosts takes None for "leave it alone" — an empty string is a real
+        value meaning "no restriction", and the title bar's Start button, which
+        sends no host list at all, must not quietly clear one.
+        """
+        wanted = (int(port or self.port), mode or self.mode, preset or self.preset,
+                  allow_hosts if allow_hosts is not None else self.allow_hosts)
         if self.running:
-            return self.state()
+            if wanted == (self.port, self.mode, self.preset, self.allow_hosts):
+                return self.state()
+            # asking for different settings means asking for a restart, not a no-op
+            await self.stop()
+            # Windows hangs on to a just-closed listener for a moment. Restarting on
+            # the same port lands on it and fails, so wait for the port to come free
+            # rather than telling the user it's in use by something else.
+            await _wait_for_port(wanted[0])
         self.port = int(port or self.port)
         self.mode = mode or self.mode
         self.preset = preset or self.preset
@@ -78,6 +115,12 @@ class ProxyManager:
         opts = options.Options(listen_host="0.0.0.0", listen_port=self.port)
         # no termlog/dumper: this process talks to a browser, not a terminal
         self.master = DumpMaster(opts, with_termlog=False, with_dumper=False)
+        # mitmproxy's errorcheck addon calls sys.exit() when startup fails, which is
+        # right for a CLI and fatal here — a port already in use would take the whole
+        # interface down with it. We report the failure instead.
+        errorcheck = self.master.addons.get("errorcheck")
+        if errorcheck is not None:
+            self.master.addons.remove(errorcheck)
 
         from mitmcloak import Bridge  # pylint: disable=import-outside-toplevel
         # Order matters. The cloak's bridge performs the upstream request itself, so
@@ -107,25 +150,97 @@ class ProxyManager:
 
         self._task = asyncio.create_task(_run())
         await asyncio.sleep(0.4)          # let it bind, so the UI reports the truth
-        if self._task.done() and self._task.exception():
+        if self._task.done():
             exc = self._task.exception()
-            self.error = f"{type(exc).__name__}: {exc}"
+            if exc is not None:
+                self.error = f"{type(exc).__name__}: {exc}"
+            elif not self.error:
+                self.error = "the proxy stopped immediately — is that port already in use?"
             self.master = None
+        # A listener that never came up is a failure, however quietly it happened.
+        # mitmproxy keeps the server object either way and only logs the bind error,
+        # so the thing to look at is whether it is actually running and holding an
+        # address — a busy port leaves is_running False and listen_addrs empty.
+        if self.master is not None:
+            ps = self.master.addons.get("proxyserver")
+            servers = list(getattr(ps, "servers", []) or [])
+            if not servers or not all(getattr(s, "is_running", False)
+                                      and getattr(s, "listen_addrs", ()) for s in servers):
+                self.error = (self.error
+                              or f"couldn't listen on port {self.port} — already in use?")
+                await self.stop()
+                return self.state()
         self.emit("proxy", self.state())
         return self.state()
 
     async def stop(self) -> dict[str, Any]:
+        """Ask the proxy to finish, and wait for the port to actually be free.
+
+        The listening socket has to be closed by hand. mitmproxy only tears servers
+        down when the mode list changes — shutdown() ends the run loop and leaves
+        the listener accepting, which on Windows the next start happily binds
+        *alongside* (SO_REUSEADDR), giving two proxies on one port and traffic
+        landing on whichever wins the race. Emptying the mode list closes it.
+        """
+        port = self.port
         if self.master is not None:
+            ps = self.master.addons.get("proxyserver")
+            if ps is not None:
+                try:
+                    await ps.servers.update([])
+                except Exception as exc:  # pylint: disable=broad-except
+                    LOG.warning("couldn't close the listener cleanly: %s", exc)
             self.master.shutdown()
         if self._task is not None:
-            self._task.cancel()
             try:
-                await self._task
-            except (asyncio.CancelledError, Exception):  # pylint: disable=broad-except
+                await asyncio.wait_for(asyncio.shield(self._task), timeout=5)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                self._task.cancel()          # it didn't go quietly
+            except Exception:  # pylint: disable=broad-except
                 pass
         self.master, self._task = None, None
+        if not await _wait_for_port(port, timeout=5):
+            LOG.warning("port %s is still answering after a stop", port)
         self.emit("proxy", self.state())
         return self.state()
+
+    # ── custom fingerprints ──────────────────────────────────────────────────
+    def _cloak_cmd(self, name: str, *args: Any) -> Any:
+        """Call one of mitmcloak's own commands, or say why we can't."""
+        if self.master is None:
+            raise RuntimeError("start the proxy first")
+        return self.master.commands.call(f"mitmcloak.{name}", *args)
+
+    def tls_catalogue(self) -> dict[str, Any]:
+        """Everything on offer: built-in presets, plus whatever this session saw.
+
+        A fingerprint mirrored from a real device is the most valuable identity
+        there is — it's that app, exactly — so it's listed beside the built-ins
+        and can be pinned or written to a file for use when the device is gone.
+        """
+        out: dict[str, Any] = {"presets": available_presets(), "mirrored": [],
+                               "catalogue": [], "error": ""}
+        if self.master is None:
+            return out
+        for key, cmd in (("presets", "presets"), ("mirrored", "mirror.list"),
+                         ("catalogue", "catalogue")):
+            try:
+                out[key] = list(self._cloak_cmd(cmd))
+            except Exception as exc:  # pylint: disable=broad-except
+                out["error"] = f"{type(exc).__name__}: {exc}"
+        return out
+
+    def tls_describe(self, name: str) -> str:
+        return str(self._cloak_cmd("preset.describe", name))
+
+    def tls_load(self, path: str) -> str:
+        """Register a preset from a JSON file — someone else's, or your own export."""
+        return str(self._cloak_cmd("preset.load", path))
+
+    def tls_export(self, directory: str, *, everything: bool = False) -> str:
+        """Write fingerprints out so they outlive the session that captured them."""
+        return str(self._cloak_cmd("catalogue.save" if everything else "mirror.export",
+                                   directory))
 
     async def replay(self, flow_id: str) -> Optional[str]:
         """Send a flow again. Returns the new flow's id so the caller can watch it."""

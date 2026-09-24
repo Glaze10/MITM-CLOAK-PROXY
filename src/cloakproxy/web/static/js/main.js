@@ -6,7 +6,7 @@ import { initFlows, loadFlows, renderFlows, upsertFlow } from "./flows.js";
 import { initIntercept, renderQueue, setIntercept } from "./intercept.js";
 import { initRepeater } from "./repeater.js";
 import { initRules, loadRules } from "./rules.js";
-import { initSettings, loadProjects, paintSettings, refreshCloakStats } from "./settings.js";
+import { initSettings, loadProjects, loadTls, paintSettings, refreshCloakStats } from "./settings.js";
 
 /* ── tabs ────────────────────────────────────────────────────────────── */
 function initTabs() {
@@ -26,7 +26,7 @@ function initTabs() {
         v.classList.toggle("on", v.dataset.sub === b.dataset.sub));
       if (b.dataset.sub === "intercept") renderQueue();
       if (b.dataset.sub === "replace") loadRules();
-      if (b.dataset.sub === "settings") refreshCloakStats();
+      if (b.dataset.sub === "settings") { refreshCloakStats(); loadTls(); }
     };
   });
 }
@@ -128,7 +128,7 @@ function connect() {
   initSettings();
 
   paintState(await api("/api/state"));
-  await Promise.all([loadFlows(), loadRules(), refreshCloakStats()]);
+  await Promise.all([loadFlows(), loadRules(), refreshCloakStats(), loadTls()]);
   const cert = await api("/api/cert");
   $("#certPath").textContent = cert.dir || "—";
   $("#aboutVersions").textContent = `UI on ${location.host} · proxy port ${state.proxy.port}`;

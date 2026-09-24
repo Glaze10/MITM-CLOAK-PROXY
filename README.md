@@ -36,8 +36,10 @@ a host at staging, strip a header that breaks a replay, redact a token before yo
 send a capture to someone. Rules run before the upstream leg, so what you see in
 history is what actually left the machine.
 
-**Proxy → Settings** — port, allowed hosts, the CA, and the fingerprint mode, which
-says in words which identity each connection will use.
+**Proxy → Settings** — port, allowed hosts, the CA, the fingerprint mode (which
+says in words which identity each connection will use), and **Custom TLS**: pin a
+specific fingerprint, read the JSON behind it, load one from a file, or export one
+captured from a real device.
 
 **Repeater** — send a request to its own tab, edit it, resend, read the response.
 The original flow stays exactly as it was captured.
@@ -76,7 +78,7 @@ The title bar always states the current behaviour, the settings tab counts how m
 connections were mirrored versus presented, and every flow carries its own answer:
 
 ```
-Upstream: mirrored the client's own handshake · h2 · 41 ms
+TLS: mirrored the client's own handshake · h2 · 41 ms
 ```
 
 Mirroring is real, not a setting that hopes for the best. The same proxy, three
@@ -87,6 +89,31 @@ curl               t12d218h1_76e208dd3e22_…     TLS 1.2, HTTP/1.1
 Chrome 151         t13d1516h2_8daaf6152771_…    TLS 1.3, h2
 iOS Safari 18      t13d2013h2_a09f3c656075_…    TLS 1.3, h2
 ```
+
+### Custom fingerprints
+
+Mirroring covers the normal case, but sometimes you want a *particular* identity:
+replaying a capture after the device has gone, testing what a site does to a
+different browser, or reusing the exact handshake of an app you fingerprinted last
+week. **Proxy → Settings → Custom TLS** is that control.
+
+The picker lists three groups, most useful first:
+
+| group | what it is |
+|---|---|
+| **Seen this session** | mirrored from a real client that came through Cloak — that app, exactly |
+| **Other fingerprints observed** | everything else the cloak catalogued this run |
+| **Built in** | the httpcloak presets (100+ browser and OS builds) |
+
+- **Use** pins the selection: the mode switches to *Always use a preset* and every
+  connection goes out as that identity, so the control can't disagree with reality.
+- **Show JSON** prints the resolved fingerprint — ciphers, extensions, ALPN,
+  HTTP/2 settings — which is also how you check that a mirror caught what you think.
+- **Export** writes the captured fingerprints to a folder as `.json`, one per
+  identity. **Load** reads one back, in this run or a month later on another machine.
+
+A fingerprint taken off a real device is the valuable thing here; export it while
+the device is still in front of you.
 
 ## Install
 

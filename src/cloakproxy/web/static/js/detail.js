@@ -35,7 +35,7 @@ function cloakLine(d) {
   const what = c.via === "mirror"
     ? `mirrored the client's own handshake`
     : `presented the <b>${esc(c.preset || "preset")}</b> fingerprint`;
-  return `<p class="hint">Upstream: ${what}${c.upstream ? ` · ${esc(c.upstream)}` : ""}${
+  return `<p class="hint">TLS: ${what}${c.upstream ? ` · ${esc(c.upstream)}` : ""}${
     c.ms != null ? ` · ${c.ms} ms` : ""}</p>`;
 }
 

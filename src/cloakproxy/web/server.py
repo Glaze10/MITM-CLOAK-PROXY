@@ -73,7 +73,7 @@ class ProxyHandler(Base):
             self.send(await self.proxy.start(port=int(body.get("port") or 0),
                                              mode=body.get("mode", ""),
                                              preset=body.get("preset", ""),
-                                             allow_hosts=body.get("allow_hosts", "")))
+                                             allow_hosts=body.get("allow_hosts")))
         elif action == "stop":
             self.send(await self.proxy.stop())
         else:
@@ -254,6 +254,32 @@ class CertHandler(Base):
         self.send({"dir": str(base), "pem": str(pem), "exists": pem.exists()})
 
 
+class TlsHandler(Base):
+    """Custom fingerprints: list, inspect, load from a file, or write out."""
+
+    def get(self) -> None:
+        cat = self.proxy.tls_catalogue()
+        cat.update(mode=self.proxy.mode, preset=self.proxy.preset)
+        self.send(cat)
+
+    def post(self) -> None:
+        b = self.body_json()
+        action = b.get("action", "")
+        try:
+            if action == "describe":
+                self.send({"ok": True, "json": self.proxy.tls_describe(b.get("name", ""))})
+            elif action == "load":
+                self.send({"ok": True, "message": self.proxy.tls_load(b.get("path", ""))})
+            elif action == "export":
+                self.send({"ok": True,
+                           "message": self.proxy.tls_export(b.get("directory", ""),
+                                                            everything=bool(b.get("all")))})
+            else:
+                self.send({"error": f"unknown action {action}"}, 400)
+        except Exception as exc:  # pylint: disable=broad-except
+            self.send({"error": f"{type(exc).__name__}: {exc}"}, 400)
+
+
 class RulesHandler(Base):
     """Match & replace rules — read them, or replace the whole list."""
 
@@ -335,6 +361,7 @@ def make_app(proxy: ProxyManager, hub: Hub) -> tornado.web.Application:
             (r"/api/mark", MarkHandler, common),
             (r"/api/cloak", CloakHandler, common),
             (r"/api/rules", RulesHandler, common),
+            (r"/api/tls", TlsHandler, common),
             (r"/api/repeater", RepeaterHandler, common),
             (r"/api/har", HarHandler, common),
             (r"/api/projects", ProjectsHandler, common),

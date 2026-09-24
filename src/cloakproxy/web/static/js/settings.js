@@ -12,7 +12,7 @@ export function paintIdentity(s = state.proxy) {
   const value = $("#idValue");
 
   // the title bar always says what will go out, in words, not settings
-  value.textContent = mirroring ? "mirroring the client" : `preset · ${s.preset || "—"}`;
+  value.textContent = mirroring ? "mirroring the client" : `custom · ${s.preset || "—"}`;
   value.classList.toggle("fallback", !mirroring);
   $("#identity").title = mirroring
     ? `Each connection goes out with the client's own TLS fingerprint.\n` +
@@ -86,7 +86,65 @@ export async function loadProjects() {
     : `<p class="empty">No saved projects yet. They live in <code>${esc(root)}</code>.</p>`;
 }
 
+/* ── custom fingerprints ─────────────────────────────────────────────── */
+export async function loadTls() {
+  const t = await api("/api/tls");
+  const groups = [
+    ["Seen this session (mirrored from a real client)", t.mirrored || []],
+    ["Other fingerprints observed", (t.catalogue || []).filter((c) => !(t.mirrored || []).includes(c))],
+    ["Built in", t.presets || []],
+  ];
+  $("#tlsPicker").innerHTML = groups
+    .filter(([, list]) => list.length)
+    .map(([label, list]) => `<optgroup label="${esc(label)}">` +
+      list.map((p) => `<option value="${esc(p)}"${p === t.preset ? " selected" : ""}>${esc(p)}</option>`)
+          .join("") + `</optgroup>`).join("");
+  if (t.error) $("#tlsPicker").insertAdjacentHTML("afterend", "");
+}
+
+function initCustomTls() {
+  const post = (body) => api("/api/tls", { method: "POST", body });
+
+  $("#tlsUse").onclick = async () => {
+    const name = $("#tlsPicker").value;
+    if (!name) return;
+    // using a specific fingerprint means not mirroring — say so by switching mode
+    $("#setPreset").innerHTML += $("#setPreset").querySelector(`option[value="${CSS.escape(name)}"]`)
+      ? "" : `<option value="${esc(name)}" selected>${esc(name)}</option>`;
+    $("#setPreset").value = name;
+    $('#modeChoices input[value="static"]').checked = true;
+    await applyAndMaybeRestart({ mode: "static", preset: name });
+    toast(`Now presenting ${name} on every connection`);
+  };
+
+  $("#tlsDescribe").onclick = async () => {
+    const r = await post({ action: "describe", name: $("#tlsPicker").value });
+    const box = $("#tlsJson");
+    if (r.error) return toast(r.error, true);
+    box.textContent = r.json || "";
+    box.classList.toggle("hidden", !r.json);
+  };
+
+  $("#tlsLoad").onclick = async () => {
+    const path = $("#tlsPath").value.trim();
+    if (!path) return toast("Point at a preset .json file", true);
+    const r = await post({ action: "load", path });
+    r.error ? toast(r.error, true) : toast(r.message || "Loaded");
+    loadTls();
+  };
+
+  const exportTo = async (all) => {
+    const directory = $("#tlsDir").value.trim();
+    if (!directory) return toast("Give a folder to write into", true);
+    const r = await post({ action: "export", directory, all });
+    r.error ? toast(r.error, true) : toast(r.message || "Written");
+  };
+  $("#tlsExport").onclick = () => exportTo(false);
+  $("#tlsExportAll").onclick = () => exportTo(true);
+}
+
 export function initSettings() {
+  initCustomTls();
   $$("#modeChoices input").forEach((r) => {
     r.onchange = () => { applyAndMaybeRestart({}); };
   });

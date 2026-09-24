@@ -17,7 +17,7 @@
   </div>
 
   <div class="identity" id="identity" title="Which TLS identity goes upstream">
-    <span class="idLabel">upstream</span>
+    <span class="idLabel">TLS</span>
     <span class="idValue" id="idValue">—</span>
   </div>
 
@@ -171,6 +171,31 @@
             <span class="stat"><b id="statMirrored">0</b> mirrored</span>
             <span class="stat"><b id="statStatic">0</b> preset</span>
           </div>
+        </section>
+
+        <section class="card" id="customTlsCard">
+          <h3>Custom TLS</h3>
+          <label class="field"><span>Fingerprint</span>
+            <select id="tlsPicker"></select>
+          </label>
+          <div class="row">
+            <button id="tlsUse">Use this one</button>
+            <button id="tlsDescribe">Show JSON</button>
+          </div>
+          <p class="hint">Built-in presets, plus every fingerprint this session has
+            actually seen. One mirrored from a real device <b>is</b> that device —
+            pin it here to keep using it after the phone is gone.</p>
+
+          <div class="row" style="margin-top:10px">
+            <input id="tlsPath" class="grow" placeholder="C:\path	o\preset.json">
+            <button id="tlsLoad">Load file</button>
+          </div>
+          <div class="row">
+            <input id="tlsDir" class="grow" placeholder="folder to write fingerprints into">
+            <button id="tlsExport">Export captured</button>
+            <button id="tlsExportAll">Export all seen</button>
+          </div>
+          <pre id="tlsJson" class="hidden" style="max-height:220px; margin-top:10px"></pre>
         </section>
 
         <section class="card">
