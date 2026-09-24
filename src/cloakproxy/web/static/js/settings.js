@@ -35,17 +35,30 @@ export async function refreshCloakStats() {
   const c = await api("/api/cloak");
   $("#statMirrored").textContent = c.mirrored ?? 0;
   $("#statStatic").textContent = c.static ?? 0;
+  // A fingerprint the cloak can't complete fails every request, and the app has
+  // no console to notice that in — so the warning goes where the choice is made.
+  const box = $("#cloakNotices");
+  const notices = c.notices || [];
+  box.innerHTML = notices.map((n) =>
+    `<p class="notice ${esc(n.level)}">${esc(n.text)}</p>`).join("");
+  box.classList.toggle("hidden", !notices.length);
 }
 
 /* ── proxy settings ──────────────────────────────────────────────────── */
 export function paintSettings(s = state.proxy) {
   $("#setPort").value = s.port ?? 8080;
   $("#setAllow").value = s.allow_hosts || "";
+  // A pinned fingerprint is often one mirrored from a device, which isn't in the
+  // built-in list — it still has to appear here, or the control would name a
+  // different identity than the one actually going out.
   const sel = $("#setPreset");
-  if ((s.presets || []).length && sel.options.length !== s.presets.length) {
-    sel.innerHTML = s.presets.map((p) =>
-      `<option value="${esc(p)}"${p === s.preset ? " selected" : ""}>${esc(p)}</option>`).join("");
+  const names = [...(s.presets || [])];
+  if (s.preset && !names.includes(s.preset)) names.unshift(s.preset);
+  if (names.join("|") !== sel.dataset.names) {
+    sel.innerHTML = names.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`).join("");
+    sel.dataset.names = names.join("|");
   }
+  sel.value = s.preset || "";
   const radio = $(`#modeChoices input[value="${s.mode || "auto"}"]`);
   if (radio) radio.checked = true;
   $("#interceptOn").checked = !!s.intercept;
@@ -89,17 +102,38 @@ export async function loadProjects() {
 /* ── custom fingerprints ─────────────────────────────────────────────── */
 export async function loadTls() {
   const t = await api("/api/tls");
+  // Only things that can actually be used go in the picker. The catalogue's ids
+  // are observations, not presets — offering them would just produce an error.
+  // Pinning restarts the proxy, and a restart starts the mirror list over — so
+  // the identity currently going out can be absent from both lists. It still has
+  // to be listed, and listed first, because it's the one in force.
+  const mirrored = t.mirrored || [], presets = t.presets || [];
+  const pinned = t.mode === "static" && t.preset
+    && !mirrored.includes(t.preset) && !presets.includes(t.preset) ? [t.preset] : [];
   const groups = [
-    ["Seen this session (mirrored from a real client)", t.mirrored || []],
-    ["Other fingerprints observed", (t.catalogue || []).filter((c) => !(t.mirrored || []).includes(c))],
-    ["Built in", t.presets || []],
+    ["In use", pinned],
+    ["Mirrored from a real client this session", mirrored],
+    ["Built in", presets],
   ];
   $("#tlsPicker").innerHTML = groups
     .filter(([, list]) => list.length)
     .map(([label, list]) => `<optgroup label="${esc(label)}">` +
       list.map((p) => `<option value="${esc(p)}"${p === t.preset ? " selected" : ""}>${esc(p)}</option>`)
           .join("") + `</optgroup>`).join("");
-  if (t.error) $("#tlsPicker").insertAdjacentHTML("afterend", "");
+
+  const seen = t.observed || [];
+  $("#tlsObserved").innerHTML = seen.length
+    ? `<h4 class="sec">Clients seen</h4>` + seen.map((c) => {
+        const bits = [`${c.conns ?? 0} conn${c.conns === 1 ? "" : "s"}`,
+                      `${c.reqs ?? 0} req${c.reqs === 1 ? "" : "s"}`];
+        if (c.refused) bits.push(`${c.refused} refused`);
+        return `<div class="seenRow"><code>${esc(c.id)}</code>
+          <span>${bits.join(" · ")}${(c.flags || []).length
+            ? " · " + esc(c.flags.join(" ")) : ""}</span>
+          <span class="dimmed">${esc((c.hosts || []).join(", "))}</span></div>`;
+      }).join("")
+    : "";
+  if (t.error) toast(t.error, true);
 }
 
 function initCustomTls() {

@@ -97,13 +97,17 @@ replaying a capture after the device has gone, testing what a site does to a
 different browser, or reusing the exact handshake of an app you fingerprinted last
 week. **Proxy → Settings → Custom TLS** is that control.
 
-The picker lists three groups, most useful first:
+The picker lists what can actually be used, most useful first:
 
 | group | what it is |
 |---|---|
-| **Seen this session** | mirrored from a real client that came through Cloak — that app, exactly |
-| **Other fingerprints observed** | everything else the cloak catalogued this run |
+| **In use** | the identity currently pinned, if it isn't in either list below |
+| **Mirrored from a real client this session** | captured from a device that came through Cloak — that app, exactly |
 | **Built in** | the httpcloak presets (100+ browser and OS builds) |
+
+Underneath, **Clients seen** reports the clients Cloak watched hand over a
+handshake — connections, requests and hosts per client. Those are observations,
+not presets, so they aren't offered as something to select.
 
 - **Use** pins the selection: the mode switches to *Always use a preset* and every
   connection goes out as that identity, so the control can't disagree with reality.
@@ -114,6 +118,12 @@ The picker lists three groups, most useful first:
 
 A fingerprint taken off a real device is the valuable thing here; export it while
 the device is still in front of you.
+
+Mirroring a client and *replaying* it as a preset are not the same trick, and the
+second can fail where the first works — a TLS 1.2 client may offer ciphers
+httpcloak can't complete, and then every request through the pinned identity
+fails. The cloak says so when it happens, and Cloak shows that warning in the
+**TLS identity** card rather than leaving it in a console the app doesn't have.
 
 ## Install
 

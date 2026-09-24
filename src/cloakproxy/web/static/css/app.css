@@ -239,3 +239,18 @@ legend { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-s
          background: var(--bg4); border: 1px solid var(--line2); border-radius: 8px;
          padding: 9px 18px; box-shadow: 0 8px 28px #000a; z-index: 40; }
 .toast.bad { border-color: var(--bad); color: var(--bad); }
+
+/* the clients Cloak has watched hand over a handshake */
+.observed { margin-top: 10px; }
+.seenRow { display: flex; gap: 10px; align-items: baseline; font-size: 11px;
+  padding: 3px 0; border-top: 1px solid var(--line); }
+.seenRow code { color: var(--accent); }
+.seenRow span:last-child { margin-left: auto; color: var(--dim2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; }
+
+/* what the cloak wants you to know about the identity you picked */
+#cloakNotices { margin-top: 8px; }
+.notice { font-size: 11px; line-height: 1.45; padding: 6px 8px; margin: 4px 0;
+  border-left: 2px solid var(--warn); background: rgba(210, 150, 60, .09);
+  color: var(--fg); border-radius: 0 3px 3px 0; }
+.notice.error { border-left-color: var(--bad); background: rgba(220, 80, 80, .1); }

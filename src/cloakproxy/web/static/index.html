@@ -142,7 +142,7 @@
         </section>
 
         <section class="card" id="fingerprintCard">
-          <h3>Upstream TLS identity</h3>
+          <h3>TLS identity</h3>
           <div class="choice" id="modeChoices">
             <label><input type="radio" name="mode" value="auto">
               <b>Mirror the client</b>
@@ -171,6 +171,7 @@
             <span class="stat"><b id="statMirrored">0</b> mirrored</span>
             <span class="stat"><b id="statStatic">0</b> preset</span>
           </div>
+          <div id="cloakNotices" class="hidden"></div>
         </section>
 
         <section class="card" id="customTlsCard">
@@ -182,12 +183,13 @@
             <button id="tlsUse">Use this one</button>
             <button id="tlsDescribe">Show JSON</button>
           </div>
-          <p class="hint">Built-in presets, plus every fingerprint this session has
-            actually seen. One mirrored from a real device <b>is</b> that device —
-            pin it here to keep using it after the phone is gone.</p>
+          <p class="hint">Built-in presets, plus every fingerprint mirrored from a
+            real client this session. One mirrored from a real device <b>is</b> that
+            device — pin it here to keep using it after the phone is gone.</p>
+          <div id="tlsObserved" class="observed"></div>
 
           <div class="row" style="margin-top:10px">
-            <input id="tlsPath" class="grow" placeholder="C:\path	o\preset.json">
+            <input id="tlsPath" class="grow" placeholder="path to a preset .json">
             <button id="tlsLoad">Load file</button>
           </div>
           <div class="row">

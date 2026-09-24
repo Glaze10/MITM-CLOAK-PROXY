@@ -322,7 +322,8 @@ class CloakHandler(Base):
         presets = sum(1 for f in self.proxy.recorder.flows.values()
                       if ((f.metadata or {}).get("mitmcloak") or {}).get("via") == "static")
         self.send({"stats": stats, "mirrored": mirrored, "static": presets,
-                   "mode": self.proxy.mode, "preset": self.proxy.preset})
+                   "mode": self.proxy.mode, "preset": self.proxy.preset,
+                   "notices": self.proxy.notices.as_list()})
 
 
 class EventSocket(tornado.websocket.WebSocketHandler):

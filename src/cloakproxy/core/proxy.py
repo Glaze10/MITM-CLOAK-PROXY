@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
+import time
+from collections import deque
 from typing import Any, Callable, Optional
 
 from mitmproxy import options
@@ -53,6 +56,40 @@ async def _wait_for_port(port: int, timeout: float = 5.0) -> bool:
         await asyncio.sleep(0.1)
 
 
+class Notices(logging.Handler):
+    """Keeps the cloak's own warnings so the interface can show them.
+
+    These matter more than usual here. httpcloak will say things like "this
+    preset offers ciphers I cannot complete" — the difference between a working
+    proxy and every request failing — and in a windowed app there is no console
+    for that to land in.
+    """
+
+    WATCHED = ("mitmcloak", "httpcloak")
+
+    def __init__(self, keep: int = 20):
+        super().__init__(level=logging.WARNING)
+        self.records: deque[dict[str, Any]] = deque(maxlen=keep)
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if not record.name.startswith(self.WATCHED):
+            return
+        try:
+            msg = record.getMessage()
+        except Exception:  # pylint: disable=broad-except
+            return
+        # the lazy-connection-strategy line is housekeeping, not something to report
+        if "forced connection_strategy" in msg:
+            return
+        if self.records and self.records[-1]["text"] == msg:
+            return                                   # the same warning per connection
+        self.records.append({"level": record.levelname.lower(), "text": msg,
+                             "at": time.time()})
+
+    def as_list(self) -> list[dict[str, Any]]:
+        return list(self.records)
+
+
 class ProxyManager:
     """Start/stop the proxy and own the flow store."""
 
@@ -67,6 +104,8 @@ class ProxyManager:
         self.preset = DEFAULT_PRESET
         self.allow_hosts = ""
         self.error: str = ""
+        self.notices = Notices()
+        logging.getLogger().addHandler(self.notices)
 
     @property
     def running(self) -> bool:
@@ -211,6 +250,33 @@ class ProxyManager:
             raise RuntimeError("start the proxy first")
         return self.master.commands.call(f"mitmcloak.{name}", *args)
 
+    @staticmethod
+    def _parse_catalogue(rows: list[str]) -> list[dict[str, Any]]:
+        """Turn the cloak's catalogue table into something the UI can render.
+
+            ad2bf5ed0a17  conns=6  reqs=6  refused=0  noreq=0  tls-only  example.com
+
+        These ids are *observations* — clients that came through — not presets you
+        can load, so they're reported as what Cloak saw rather than offered in a
+        picker where choosing one would only fail.
+        """
+        seen = []
+        for row in rows:
+            parts = [p for p in re.split(r"\s{2,}", str(row).strip()) if p]
+            if not parts:
+                continue
+            item: dict[str, Any] = {"id": parts[0], "flags": [], "hosts": []}
+            for part in parts[1:]:
+                if "=" in part:
+                    key, _, val = part.partition("=")
+                    item[key] = int(val) if val.isdigit() else val
+                elif "." in part or "," in part:
+                    item["hosts"] = [h.strip() for h in part.split(",") if h.strip()]
+                else:
+                    item["flags"].append(part)
+            seen.append(item)
+        return seen
+
     def tls_catalogue(self) -> dict[str, Any]:
         """Everything on offer: built-in presets, plus whatever this session saw.
 
@@ -219,15 +285,17 @@ class ProxyManager:
         and can be pinned or written to a file for use when the device is gone.
         """
         out: dict[str, Any] = {"presets": available_presets(), "mirrored": [],
-                               "catalogue": [], "error": ""}
+                               "observed": [], "error": ""}
         if self.master is None:
             return out
         for key, cmd in (("presets", "presets"), ("mirrored", "mirror.list"),
-                         ("catalogue", "catalogue")):
+                         ("observed", "catalogue")):
             try:
-                out[key] = list(self._cloak_cmd(cmd))
+                rows = list(self._cloak_cmd(cmd))
             except Exception as exc:  # pylint: disable=broad-except
                 out["error"] = f"{type(exc).__name__}: {exc}"
+                continue
+            out[key] = self._parse_catalogue(rows) if key == "observed" else rows
         return out
 
     def tls_describe(self, name: str) -> str:
