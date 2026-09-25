@@ -1,5 +1,5 @@
 /* Boot: wire the tab shell, the title bar, and the live event feed. */
-import { $, $$, api, copy, state, toast } from "./core.js";
+import { $, $$, api, copy, pickFile, saveText, state, toast } from "./core.js";
 import { initDetail } from "./detail.js";
 import { initFilter } from "./filter.js";
 import { initFlows, loadFlows, renderFlows, upsertFlow } from "./flows.js";
@@ -94,14 +94,17 @@ function initHistoryBar() {
     renderFlows();
     renderQueue();
   };
-  $("#btnExport").onclick = () => {
+  $("#btnExport").onclick = async () => {
     const ids = [...state.selected];
-    window.location = ids.length > 1
-      ? `/api/har?name=cloak-selection.har&ids=${ids.join(",")}`
-      : "/api/har?name=cloak.har";
+    const many = ids.length > 1;
+    const name = many ? "cloak-selection.har" : "cloak.har";
+    const url = many ? `/api/har?name=${name}&ids=${ids.join(",")}` : `/api/har?name=${name}`;
+    // fetch the HAR, then hand it to the window's Save dialog (or the browser)
+    const text = await fetch(url).then((r) => r.text());
+    await saveText(name, text, url);
   };
   $("#btnImport").onclick = async () => {
-    const path = prompt("Path to a .har file on this machine:");
+    const path = await pickFile();
     if (!path) return;
     const r = await api("/api/har", { method: "POST", body: { path } });
     r.error ? toast(r.error, true) : toast(`Imported ${r.imported} entries`);

@@ -133,6 +133,84 @@ export function asRawResponse(d) {
 
 export const asResponseBody = (d) => ((d.response || {}).body || {}).text || "";
 
+/* The desktop window exposes native file dialogs through window.pywebview.api;
+   a plain browser (the --no-window mode) has none, so these fall back to the
+   ordinary download / prompt, which work there. One call site, either way. */
+export const host = () =>
+  (typeof window !== "undefined" && window.pywebview && window.pywebview.api) || null;
+
+export async function saveText(name, text, url) {
+  const api = host();
+  if (api) {
+    const r = await api.save_file(name, text);
+    if (r && r.ok) toast(`Saved to ${r.path}`);
+    else if (r && r.error) toast(r.error, true);
+    return;
+  }
+  if (url) { window.location = url; return; }        // browser: let it download
+  const blob = new Blob([text], { type: "application/octet-stream" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+export async function saveBinaryUrl(name, url) {
+  const api = host();
+  if (!api) { window.location = url; return; }        // browser downloads it
+  const buf = await fetch(url).then((r) => r.arrayBuffer());
+  let bin = ""; const bytes = new Uint8Array(buf);
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  const r = await api.save_bytes(name, btoa(bin));
+  if (r && r.ok) toast(`Saved to ${r.path}`);
+  else if (r && r.error) toast(r.error, true);
+}
+
+/* A text prompt that works inside the desktop window, where window.prompt()
+   returns nothing. Resolves to the string, or null if dismissed. */
+export function askText(title, initial = "", { multiline = false } = {}) {
+  return new Promise((resolve) => {
+    const back = document.createElement("div");
+    back.className = "modal";
+    back.innerHTML = `
+      <div class="modalBox" style="width:min(460px,92vw)">
+        <header><h3>${String(title).replace(/[&<>]/g, "")}</h3></header>
+        <div class="modalBody">
+          ${multiline
+            ? `<textarea class="grow" style="width:100%;min-height:96px"></textarea>`
+            : `<input class="grow" style="width:100%">`}
+        </div>
+        <footer>
+          <span class="spacer"></span>
+          <button data-x="cancel">Cancel</button>
+          <button data-x="ok" class="primary">Save</button>
+        </footer>
+      </div>`;
+    document.body.appendChild(back);
+    const field = back.querySelector("input, textarea");
+    field.value = initial;
+    field.focus();
+    field.select?.();
+    const done = (val) => { back.remove(); resolve(val); };
+    back.addEventListener("click", (e) => {
+      if (e.target === back || e.target.dataset.x === "cancel") done(null);
+      if (e.target.dataset.x === "ok") done(field.value);
+    });
+    field.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") done(null);
+      if (e.key === "Enter" && (!multiline || e.ctrlKey || e.metaKey)) done(field.value);
+    });
+  });
+}
+
+export async function pickFile() {
+  const api = host();
+  if (api) {
+    const r = await api.open_file();
+    return r && r.ok ? r.path : null;
+  }
+  return prompt("Path to a .har file on this machine:");   // browser fallback
+}
+
 export async function copy(text, what = "Copied") {
   try {
     await navigator.clipboard.writeText(text);

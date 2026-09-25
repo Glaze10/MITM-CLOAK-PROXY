@@ -171,6 +171,13 @@ class MarkHandler(Base):
         self.send({"ok": True, "marked": n})
 
 
+class NoteHandler(Base):
+    def post(self) -> None:
+        body = self.body_json()
+        n = self.proxy.recorder.note(body.get("ids") or [], body.get("text", ""))
+        self.send({"ok": True, "noted": n})
+
+
 class InterceptHandler(Base):
     def post(self) -> None:
         body = self.body_json()
@@ -399,6 +406,7 @@ def make_app(proxy: ProxyManager, hub: Hub) -> tornado.web.Application:
             (r"/api/flows/([^/]+)", FlowHandler, common),
             (r"/api/intercept", InterceptHandler, common),
             (r"/api/mark", MarkHandler, common),
+            (r"/api/note", NoteHandler, common),
             (r"/api/cloak", CloakHandler, common),
             (r"/api/rules", RulesHandler, common),
             (r"/api/tls", TlsHandler, common),

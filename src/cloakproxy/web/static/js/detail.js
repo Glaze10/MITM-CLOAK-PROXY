@@ -54,6 +54,19 @@ function cloakLine(d) {
     c.upstream ? ` · ${esc(c.upstream)}` : ""}${c.ms != null ? ` · ${c.ms} ms` : ""}</p>`;
 }
 
+/** Keep the reader's place when a flow updates under them.
+
+    A response arriving on the flow you're already reading re-renders both
+    halves; without this the pane scrolls itself back to the top mid-read. */
+function keepingScroll(fn) {
+  const req = $("#reqBody"), res = $("#resBody");
+  const same = state.detail && state.detail.id === lastId;
+  const top = [req.scrollTop, res.scrollTop];
+  fn();
+  lastId = state.detail ? state.detail.id : null;
+  if (same) { req.scrollTop = top[0]; res.scrollTop = top[1]; }
+}
+
 export function renderDetail() {
   keepingScroll(() => renderDetailNow());
 }

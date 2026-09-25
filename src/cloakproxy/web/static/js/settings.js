@@ -2,7 +2,7 @@
    The fingerprint half exists because "which identity is actually going out?"
    is the question this whole tool is for, and a dropdown next to a mode
    selector answers it ambiguously. */
-import { $, $$, api, esc, state, toast } from "./core.js";
+import { $, $$, api, esc, saveBinaryUrl, state, toast } from "./core.js";
 import { loadFlows } from "./flows.js";
 
 const dismissed = new Set();      // notices this session has been told to stop showing
@@ -180,7 +180,7 @@ export async function loadProjects() {
   $("#projectList").innerHTML = projects.length ? projects.map((p) => `
     <div class="project">
       <h4>${esc(p.name)}</h4>
-      <div class="meta">${p.flows} flows · ${esc(p.saved || "")}<br>
+      <div class="meta">${p.flows} request${p.flows === 1 ? "" : "s"} · ${esc(p.saved || "")}<br>
         ${(p.size / 1024).toFixed(0)} KB</div>
       <button data-open="${esc(p.name)}" class="primary">Open</button>
       <button data-del="${esc(p.name)}" class="danger">Delete</button>
@@ -287,7 +287,7 @@ export function initSettings() {
     const c = await api("/api/cert");
     $("#certPath").textContent = c.dir || "—";
     if (!c.exists) return toast("Start the proxy once — the CA is created on first run", true);
-    window.location = "/api/cert?download=1";
+    await saveBinaryUrl("cloak-ca.pem", "/api/cert?download=1");
   };
 
   $("#setPrettyDefault").onchange = (e) => { state.prefs.pretty = e.target.checked; };
@@ -298,7 +298,7 @@ export function initSettings() {
     const name = $("#projectName").value.trim();
     if (!name) return toast("Give the project a name", true);
     const r = await api("/api/projects", { method: "POST", body: { action: "save", name } });
-    toast(`Saved ${r.project.flows} flows`);
+    toast(`Saved ${r.project.flows} request${r.project.flows === 1 ? "" : "s"}`);
     loadProjects();
   };
   $("#btnRefreshProjects").onclick = loadProjects;
@@ -307,7 +307,7 @@ export function initSettings() {
     const del = e.target.closest("[data-del]");
     if (open) {
       const r = await api("/api/projects", { method: "POST", body: { action: "load", name: open.dataset.open } });
-      toast(`Loaded ${r.flows} flows`);
+      toast(`Loaded ${r.flows} request${r.flows === 1 ? "" : "s"}`);
       await loadFlows();
       document.querySelector('.tabs.top button[data-tab="proxy"]').click();
     } else if (del) {

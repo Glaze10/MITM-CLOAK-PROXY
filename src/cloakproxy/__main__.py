@@ -41,6 +41,60 @@ def _claim_taskbar_identity() -> None:
         pass          # cosmetic; never worth failing to start over
 
 
+class Bridge:
+    """The desktop window's link to the native file dialogs.
+
+    An embedded webview isn't a browser: it won't download a file when the page
+    navigates to one, and window.prompt() returns nothing. So export, import and
+    "download CA" — all of which worked in a plain browser — did nothing in the
+    app. These give the page real Save and Open dialogs to call instead.
+    """
+
+    def __init__(self) -> None:
+        self.window = None
+
+    def save_file(self, suggested_name: str, text: str) -> dict:
+        """Write text to a location the user picks. Returns the path, or {}."""
+        import webview  # pylint: disable=import-outside-toplevel
+        result = self.window.create_file_dialog(
+            webview.SAVE_DIALOG, save_filename=suggested_name)
+        if not result:
+            return {"ok": False, "cancelled": True}
+        path = result[0] if isinstance(result, (list, tuple)) else result
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            return {"ok": True, "path": path}
+        except Exception as exc:  # pylint: disable=broad-except
+            return {"ok": False, "error": str(exc)}
+
+    def save_bytes(self, suggested_name: str, b64: str) -> dict:
+        """Same, for binary content (the CA certificate) passed as base64."""
+        import base64  # pylint: disable=import-outside-toplevel
+        import webview  # pylint: disable=import-outside-toplevel
+        result = self.window.create_file_dialog(
+            webview.SAVE_DIALOG, save_filename=suggested_name)
+        if not result:
+            return {"ok": False, "cancelled": True}
+        path = result[0] if isinstance(result, (list, tuple)) else result
+        try:
+            with open(path, "wb") as fh:
+                fh.write(base64.b64decode(b64))
+            return {"ok": True, "path": path}
+        except Exception as exc:  # pylint: disable=broad-except
+            return {"ok": False, "error": str(exc)}
+
+    def open_file(self) -> dict:
+        """Let the user pick a file to import. Returns its path, or {}."""
+        import webview  # pylint: disable=import-outside-toplevel
+        result = self.window.create_file_dialog(
+            webview.OPEN_DIALOG, file_types=("HAR files (*.har)", "All files (*.*)"))
+        if not result:
+            return {"ok": False, "cancelled": True}
+        path = result[0] if isinstance(result, (list, tuple)) else result
+        return {"ok": True, "path": path}
+
+
 def _window(url: str, port: int) -> bool:
     """A real window if pywebview is around, otherwise the default browser."""
     try:
@@ -48,10 +102,12 @@ def _window(url: str, port: int) -> bool:
     except ImportError:
         return False
     _claim_taskbar_identity()
+    bridge = Bridge()
     # the title says what this window is for; pywebview otherwise takes the
     # interpreter's own icon, which is the console look
-    webview.create_window(f"Cloak — proxy :{port}", url,
-                          width=1500, height=940, min_size=(1000, 640))
+    bridge.window = webview.create_window(
+        f"Cloak — proxy :{port}", url, width=1500, height=940,
+        min_size=(1000, 640), js_api=bridge)
     webview.start(icon=str(ICON) if ICON.exists() else None)
     return True
 

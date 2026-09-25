@@ -209,10 +209,41 @@ pre { font-family: var(--mono); font-size: 12px; background: var(--bg2);
 .project .meta { color: var(--dim2); font-size: 12px; margin-bottom: 10px; }
 
 /* ── repeater ─────────────────────────────────────────────────────────── */
-#repeaterTabs button { max-width: 210px; overflow: hidden; text-overflow: ellipsis;
-                       white-space: nowrap; }
 .repeaterPane { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-.repeaterPane .toolbar input { font-family: var(--mono); }
+
+/* tabs read like a request: coloured method chip, then the host */
+.reptab { display: inline-flex; align-items: center; gap: 7px; max-width: 230px; }
+.reptab .reptitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--mono); font-size: 12px; }
+.repmethod { font-family: var(--mono); font-size: 10px; font-weight: 700;
+  padding: 1px 5px; border-radius: 4px; background: var(--bg4); color: var(--dim); }
+.repmethod.m-get { color: var(--ok); } .repmethod.m-post { color: var(--accent-warm); }
+.repmethod.m-put { color: var(--accent); } .repmethod.m-patch { color: var(--purple); }
+.repmethod.m-delete { color: var(--bad); }
+
+/* the send bar: method dropdown, url, send — one line, aligned */
+.reptoolbar { display: flex; gap: 8px; padding: 9px 10px; flex: 0 0 auto;
+  border-bottom: 1px solid var(--line); background: var(--bg2); }
+.reptoolbar .repmethodsel { flex: 0 0 auto; width: 104px; font-family: var(--mono); font-weight: 600; }
+.reptoolbar input { font-family: var(--mono); }
+.reptoolbar .primary { flex: 0 0 auto; min-width: 78px; }
+
+/* one editor for the whole request, filling its pane */
+.halfbody.nopad { padding: 0; }
+.repraw { width: 100%; height: 100%; resize: none; border: 0; border-radius: 0;
+  background: var(--bg); padding: 10px 12px; font-family: var(--mono); font-size: 12px;
+  line-height: 1.5; }
+.repraw:focus { box-shadow: none; }
+
+/* response: a slim status strip instead of a big coloured block */
+.repstatus { display: flex; align-items: baseline; gap: 8px; padding: 4px 2px 10px;
+  border-bottom: 1px solid var(--line); margin-bottom: 10px; font-family: var(--mono); }
+.repstatus .code { font-size: 17px; font-weight: 700; }
+.repstatus.status-2 .code { color: var(--ok); } .repstatus.status-3 .code { color: var(--accent); }
+.repstatus.status-4 .code { color: var(--warn); }
+.repstatus.status-5 .code, .repstatus.status-0 .code { color: var(--bad); }
+.repstatus .reason { color: var(--dim); } .repstatus .dim { color: var(--dim2); font-size: 11px; }
+.repbody { margin-top: 10px; background: var(--bg); border-color: var(--line); }
 
 /* ── modal ────────────────────────────────────────────────────────────── */
 .modal { position: fixed; inset: 0; background: #0009; display: flex; align-items: center;
@@ -497,3 +528,30 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 pre::-webkit-scrollbar-thumb, .halfbody::-webkit-scrollbar-thumb {
   background: #343a4c; background-clip: content-box;
 }
+
+/* ── row highlighting: the whole row takes the colour, like Burp ─────────
+   The mark used to be a 2px bar down the left edge, which was easy to miss.
+   It now tints the entire row; the little dot in the first column stays as a
+   second cue for anyone scanning the margin. */
+tr.m-red td, tr.m-orange td, tr.m-yellow td,
+tr.m-green td, tr.m-blue td, tr.m-purple td { box-shadow: none; }
+tr.m-red td    { background: rgba(242, 86, 95, .20); }
+tr.m-orange td { background: rgba(242, 159, 86, .20); }
+tr.m-yellow td { background: rgba(232, 209, 75, .16); }
+tr.m-green td  { background: rgba(78, 201, 160, .16); }
+tr.m-blue td   { background: rgba(90, 169, 255, .20); }
+tr.m-purple td { background: rgba(185, 140, 255, .20); }
+tr.m-red:hover td    { background: rgba(242, 86, 95, .30); }
+tr.m-orange:hover td { background: rgba(242, 159, 86, .30); }
+tr.m-yellow:hover td { background: rgba(232, 209, 75, .26); }
+tr.m-green:hover td  { background: rgba(78, 201, 160, .26); }
+tr.m-blue:hover td   { background: rgba(90, 169, 255, .30); }
+tr.m-purple:hover td { background: rgba(185, 140, 255, .30); }
+/* selection stays legible on top of any highlight colour */
+table.flows tbody tr.sel td { box-shadow: inset 2px 0 0 var(--accent); color: #eef2fa; }
+table.flows tbody tr.sel:not([class*="m-"]) td { background: #1e2a42; }
+
+/* ── notes column ───────────────────────────────────────────────────────── */
+.c-note { width: 200px; }
+#rows td:last-child { color: var(--dim); font-style: italic; }
+#rows td.has-note { color: var(--fg); }

@@ -1,7 +1,7 @@
 /* The history table: rendering, selection, highlighting, and the right-click menu. */
 import {
   $, $$, api, asCurl, asFetch, asPowerShell, asPython, asRawRequest, asRawResponse,
-  asResponseBody, copy, esc, fmtSize, MARKS, state, toast,
+  asResponseBody, askText, copy, esc, fmtSize, MARKS, state, toast,
 } from "./core.js";
 import { showDetail } from "./detail.js";
 import { addRepeaterTab } from "./repeater.js";
@@ -13,7 +13,7 @@ import { addRepeaterTab } from "./repeater.js";
    reloading itself while traffic came in. */
 const rowEls = new Map();          // flow id -> <tr>
 
-const CELLS = 9;
+const CELLS = 10;
 
 function rowClass(f) {
   return [
@@ -54,6 +54,11 @@ function fillRow(tr, f) {
   set(8, cloak.label || "", "tls-" + via + (cloak.label_source
     ? " src-" + cloak.label_source : ""));
   if (td[8].title !== tlsTitle(cloak)) td[8].title = tlsTitle(cloak);
+  // a note the user wrote, kept on the flow's comment field
+  const note = f.comment || "";
+  if (td[9].textContent !== note) td[9].textContent = note;
+  if (td[9].title !== note) td[9].title = note;
+  td[9].className = note ? "has-note" : "";
   noteIdentity(cloak);
 }
 
@@ -222,6 +227,18 @@ export async function markSelection(colour) {
   await api("/api/mark", { method: "POST", body: { ids, colour } });
 }
 
+/** Write a note onto the selected flows (mitmproxy's comment field). */
+export async function setNote(ids, text) {
+  if (!ids.length) return;
+  for (const id of ids) {
+    const f = state.flows.get(id);
+    if (f) f.comment = text || "";
+  }
+  repaintRows(ids);
+  if (state.detail && ids.includes(state.detail.id)) state.detail.comment = text || "";
+  await api("/api/note", { method: "POST", body: { ids, text } });
+}
+
 /* ── context menu ────────────────────────────────────────────────────── */
 /* Which format is wanted depends on where the request is going next, so the
    menu offers the handful that cover it rather than guessing. */
@@ -260,6 +277,9 @@ function openCtx(x, y, id) {
       <div class="swatch none" data-mark="" title="clear"></div>
     </div>
     <div class="sep"></div>
+    <button data-act="note">${f.comment ? "Edit note…" : "Add note…"}</button>
+    ${f.comment ? `<button data-act="note-clear">Clear note</button>` : ""}
+    <div class="sep"></div>
     <button data-act="repeater">Send to Repeater</button>
     <button data-act="replay">Replay${n > 1 ? ` (${n})` : ""}</button>
     ${parked ? `<button data-act="forward">Forward</button>
@@ -287,7 +307,15 @@ function openCtx(x, y, id) {
 async function runCtxAction(act, id) {
   const ids = selectedIds();
   const f = state.flows.get(id) || {};
-  if (act === "repeater") {
+  if (act === "note") {
+    const text = await askText(
+      ids.length > 1 ? `Note for ${ids.length} requests` : "Note for this request",
+      f.comment || "", { multiline: true });
+    if (text === null) return;                      // cancelled
+    await setNote(ids, text);
+  } else if (act === "note-clear") {
+    await setNote(ids, "");
+  } else if (act === "repeater") {
     for (const i of ids.slice(0, 5)) await addRepeaterTab(i);
   } else if (act === "replay") {
     for (const i of ids) await api(`/api/flows/${i}`, { method: "POST", body: { action: "replay" } });

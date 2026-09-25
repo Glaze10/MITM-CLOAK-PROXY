@@ -178,6 +178,19 @@ class Recorder:
             self._emit("marked", summarize(flow))
         return n
 
+    def note(self, ids: list[str], text: str) -> int:
+        """Attach a note to flows. mitmproxy's own `comment` field holds it, so
+        the note is written into the project and comes back with it."""
+        n = 0
+        for fid in ids:
+            flow = self.flows.get(fid)
+            if flow is None:
+                continue
+            flow.comment = text or ""
+            n += 1
+            self._emit("marked", summarize(flow))   # same lightweight row refresh
+        return n
+
     def clear(self) -> None:
         self.flows.clear()
         self.paused.clear()
