@@ -135,7 +135,16 @@ def _window(url: str, port: int) -> bool:
     bridge.window = webview.create_window(
         f"Cloak — proxy :{port}", url, width=1500, height=940,
         min_size=(1000, 640), js_api=bridge)
-    webview.start(icon=str(ICON) if ICON.exists() else None)
+    # A persistent WebView2 profile instead of the default throwaway one. Private
+    # mode rebuilds a fresh profile on every launch, which on Windows can leave
+    # the window unresponsive for a while as WebView2 initialises it from cold.
+    store = Path.home() / ".cloak" / "webview"
+    try:
+        store.mkdir(parents=True, exist_ok=True)
+    except Exception:  # pylint: disable=broad-except
+        pass
+    webview.start(icon=str(ICON) if ICON.exists() else None,
+                  private_mode=False, storage_path=str(store))
     return True
 
 

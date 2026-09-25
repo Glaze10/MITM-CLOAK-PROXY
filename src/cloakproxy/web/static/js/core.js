@@ -231,11 +231,14 @@ export async function copy(text, what = "Copied") {
 }
 
 /** Make a gutter drag-resize the element before it. */
-export function draggable(gutter, target, axis = "y") {
+export function draggable(gutter, target, axis = "y", invert = false) {
+  // invert is for a pane that sits to the RIGHT of its gutter: dragging the
+  // gutter left should grow it, so the delta runs the other way.
   let start = 0, startSize = 0, dragging = false;
   const onMove = (e) => {
     if (!dragging) return;
-    const delta = (axis === "y" ? e.clientY : e.clientX) - start;
+    let delta = (axis === "y" ? e.clientY : e.clientX) - start;
+    if (invert) delta = -delta;
     const size = Math.max(80, startSize + delta);
     if (axis === "y") target.style.height = size + "px";
     else target.style.flex = `0 0 ${size}px`;

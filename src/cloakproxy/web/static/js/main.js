@@ -66,11 +66,21 @@ function initTitlebar() {
   };
   $("#btnToggle").onclick = async () => {
     const running = state.proxy.running;
-    paintState(await api(running ? "/api/proxy/stop" : "/api/proxy/start", {
-      method: "POST",
-      body: { mode: $('#modeChoices input:checked')?.value || "auto",
-              preset: $("#setPreset").value },
-    }));
+    // acknowledge the click at once — start/stop does real work (binding or a
+    // graceful shutdown) and awaiting it before any paint reads as a dead button
+    const btn = $("#btnToggle");
+    btn.disabled = true;
+    btn.textContent = running ? "Stopping…" : "Starting…";
+    $("#statusText").textContent = running ? "stopping…" : "starting…";
+    try {
+      paintState(await api(running ? "/api/proxy/stop" : "/api/proxy/start", {
+        method: "POST",
+        body: { mode: $('#modeChoices input:checked')?.value || "auto",
+                preset: $("#setPreset").value },
+      }));
+    } finally {
+      btn.disabled = false;
+    }
   };
   $("#btnIntercept").onclick = async () => {
     paintState(await setIntercept(!state.proxy.intercept, undefined));
@@ -161,11 +171,34 @@ function connect() {
   initReload();
   initAutosave();
 
-  paintState(await api("/api/state"));
-  await Promise.all([loadFlows(), loadRules(), refreshCloakStats(), loadTls()]);
-  const cert = await api("/api/cert");
-  $("#certPath").textContent = cert.dir || "—";
-  $("#aboutVersions").textContent = `UI on ${location.host} · proxy port ${state.proxy.port}`;
+  // Get the essentials up first — state and the flow list — so the window is
+  // interactive at once. Everything else loads after, without blocking, and
+  // each step is timed so a slow one shows up in the console rather than as a
+  // mysterious "not responding".
+  const t = (label, p) => {
+    const t0 = performance.now();
+    return Promise.resolve(p).then((r) => {
+      const ms = performance.now() - t0;
+      if (ms > 250) console.warn(`[boot] ${label} took ${ms.toFixed(0)}ms`);
+      return r;
+    }).catch((e) => console.error(`[boot] ${label} failed`, e));
+  };
+
+  paintState(await t("state", api("/api/state")));
+  await t("flows", loadFlows());
+
+  // the interface is usable now — drop the loading splash
+  const splash = $("#splash");
+  if (splash) { splash.classList.add("gone"); setTimeout(() => splash.remove(), 400); }
+
   connect();
+  // non-essential; let them settle in the background
+  t("rules", loadRules());
+  t("cloak", refreshCloakStats());
+  t("tls", loadTls());
+  t("cert", api("/api/cert")).then((cert) => {
+    if (cert) $("#certPath").textContent = cert.dir || "—";
+  });
+  $("#aboutVersions").textContent = `UI on ${location.host} · proxy port ${state.proxy.port}`;
   setInterval(refreshCloakStats, 4000);
 })();

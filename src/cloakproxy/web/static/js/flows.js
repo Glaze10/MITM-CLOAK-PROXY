@@ -54,7 +54,6 @@ function fillRow(tr, f) {
   if (td[9].textContent !== note) td[9].textContent = note;
   if (td[9].title !== note) td[9].title = note;
   td[9].className = note ? "has-note" : "";
-  noteIdentity(cloak);
 }
 
 const HOW = {
@@ -145,7 +144,9 @@ function paintCounts() {
 }
 
 /** Render only the slice of rows visible in the pane, with spacers for the rest. */
-function paint() {
+let lastStart = -1, lastEnd = -1, lastTotal = -1;
+
+function paint(force) {
   scheduled = false;
   const body = $("#rows");
   const pane = $("#flowPane");
@@ -158,6 +159,15 @@ function paint() {
   let count = Math.ceil(view / ROW_H) + buffer * 2;
   let end = Math.min(total, start + count);
   if (end <= start) { start = 0; end = Math.min(total, count); }
+
+  // The common case while scrolling is that the visible window hasn't actually
+  // moved by a whole row — do nothing then, rather than tear down and rebuild
+  // the same rows every frame.
+  if (!force && start === lastStart && end === lastEnd && total === lastTotal) {
+    paintCounts();
+    return;
+  }
+  lastStart = start; lastEnd = end; lastTotal = total;
 
   // clear the current visible rows (keep spacers), then lay out the slice
   for (const tr of [...body.children]) if (!tr.classList.contains("spacer")) tr.remove();
@@ -210,6 +220,7 @@ export function upsertFlow(f) {
   if (!known) {
     state.order.push(f.id);
     freshId = f.id;
+    noteIdentity(merged.cloak || {});    // title bar follows the newest connection
     markDirty();
     setTimeout(() => { if (freshId === f.id) { freshId = null; schedulePaint(); } }, 700);
     const max = state.prefs.maxRows || 2000;

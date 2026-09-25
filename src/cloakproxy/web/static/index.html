@@ -9,6 +9,16 @@
 </head>
 <body>
 
+<!-- ── loading splash: shown until boot finishes, then faded out ──────────────
+     The bar animates on the compositor, so it keeps moving even while the main
+     thread is busy bringing the interface up. -->
+<div id="splash">
+  <div class="splashmark"></div>
+  <div class="splashtitle">Cloak Proxy</div>
+  <div class="splashsub">Loading…</div>
+  <div class="splashbar"><span></span></div>
+</div>
+
 <!-- ── title bar: what the proxy is doing, always visible ─────────────────── -->
 <header class="titlebar">
   <div class="brand">Cloak</div>
@@ -106,6 +116,7 @@
                 <span class="spacer"></span>
                 <button class="mini" data-copy="response">Copy</button>
                 <button class="mini" id="btnToRepeater">Send to Repeater</button>
+                <button class="mini hidden" id="btnNoteShow" title="Show the note pane">Note</button>
               </div>
               <div class="halfbody" id="resBody"><p class="empty">—</p></div>
               <div class="findbar" data-find="resBody">
@@ -117,7 +128,10 @@
             </div>
             <div class="gutter-v" id="gutterN" title="Drag to resize"></div>
             <div class="half notecol" id="noteHalf">
-              <div class="halfbar"><span>Note</span></div>
+              <div class="halfbar"><span>Note</span>
+                <span class="spacer"></span>
+                <button class="mini x" id="btnNoteClose" title="Close (expand request/response)">✕</button>
+              </div>
               <div class="halfbody">
                 <textarea id="noteEdit" class="noteedit" spellcheck="false"
                   placeholder="No note. Type here, or right-click the request."></textarea>

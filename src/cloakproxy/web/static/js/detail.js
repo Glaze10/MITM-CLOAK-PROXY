@@ -10,6 +10,10 @@ const headerTable = (pairs) =>
   `<table class="kv">${(pairs || []).map(([k, v]) =>
     `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("")}</table>`;
 
+// headers minus the cookie lines, which are shown in their own block above
+const noCookies = (pairs) => (pairs || []).filter(
+  ([k]) => !["cookie", "set-cookie"].includes(k.toLowerCase()));
+
 /* Cookies get their own block above the headers. A request's Cookie header is
    often the longest line on the page and a wall of name=value pairs; pulling it
    out and splitting it makes the actual headers readable, and makes a single
@@ -213,7 +217,7 @@ function renderDetailNow() {
     <div class="statusline">${esc(d.request.method)} <span class="url">${esc(d.request.url)}</span></div>
     ${cloakLine(d)}
     ${cookieBlock(d.request.headers)}
-    <h4 class="sec">Headers</h4>${headerTable(d.request.headers)}
+    <h4 class="sec">Headers</h4>${headerTable(noCookies(d.request.headers))}
     ${bodyBlock(d.request.body, reqMime)}`;
 
   if (!d.response) {
@@ -228,7 +232,7 @@ function renderDetailNow() {
     <div class="statusline status-${String(d.response.status)[0]}">${d.response.status} ${
       esc(d.response.reason || "")}</div>
     ${cookieBlock(d.response.headers)}
-    <h4 class="sec">Headers</h4>${headerTable(d.response.headers)}
+    <h4 class="sec">Headers</h4>${headerTable(noCookies(d.response.headers))}
     ${bodyBlock(d.response.body, resMime)}`;
 }
 
@@ -240,8 +244,23 @@ export async function showDetail(id) {
 export function initDetail() {
   draggable($("#gutterH"), $("#flowPane"), "y");
   draggable($("#gutterV"), $("#reqHalf"), "x");
-  draggable($("#gutterN"), $("#noteHalf"), "x");
+  draggable($("#gutterN"), $("#noteHalf"), "x", true);   // note pane is right of its gutter
   initFind();
+
+  // the note pane can be closed to give the request/response the full width;
+  // the choice is remembered, and a "Note" button in the response bar brings
+  // it back
+  const setNotePane = (open) => {
+    $("#noteHalf").classList.toggle("hidden", !open);
+    $("#gutterN").classList.toggle("hidden", !open);
+    $("#btnNoteShow").classList.toggle("hidden", open);
+    try { localStorage.setItem("cloak.notePane", open ? "1" : "0"); } catch { /* ignore */ }
+  };
+  let noteOpen = true;
+  try { noteOpen = localStorage.getItem("cloak.notePane") !== "0"; } catch { /* ignore */ }
+  setNotePane(noteOpen);
+  $("#btnNoteClose").onclick = () => setNotePane(false);
+  $("#btnNoteShow").onclick = () => setNotePane(true);
 
   // edit the note in place; save shortly after you stop typing
   let noteTimer = null;
