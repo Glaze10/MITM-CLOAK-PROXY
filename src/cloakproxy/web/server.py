@@ -66,6 +66,22 @@ class StateHandler(Base):
         self.send(self.proxy.state())
 
 
+class ReadyHandler(tornado.web.RequestHandler):
+    """Whether the interface has actually connected — the splash's cue to close.
+
+    The page opens a WebSocket as the last step of boot, so a client in the hub
+    means the real window has rendered and the loading screen can go away.
+    """
+
+    def initialize(self, hub: "Hub") -> None:  # noqa: D102
+        self.hub = hub
+
+    def get(self) -> None:
+        self.set_header("Content-Type", "application/json")
+        self.set_header("Cache-Control", "no-store")
+        self.write(json.dumps({"ui": len(self.hub.clients)}))
+
+
 class ProxyHandler(Base):
     async def post(self, action: str) -> None:
         body = self.body_json()
@@ -409,6 +425,7 @@ def make_app(proxy: ProxyManager, hub: Hub) -> tornado.web.Application:
         [
             (r"/", IndexHandler),
             (r"/api/state", StateHandler, common),
+            (r"/api/ready", ReadyHandler, dict(hub=hub)),
             (r"/api/proxy/(start|stop|config)", ProxyHandler, common),
             (r"/api/flows", FlowsHandler, common),
             (r"/api/flows/([^/]+)", FlowHandler, common),

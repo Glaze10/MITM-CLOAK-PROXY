@@ -239,7 +239,13 @@ export function draggable(gutter, target, axis = "y", invert = false) {
     if (!dragging) return;
     let delta = (axis === "y" ? e.clientY : e.clientX) - start;
     if (invert) delta = -delta;
-    const size = Math.max(80, startSize + delta);
+    // Clamp so a pane can't be dragged away to nothing or big enough to shove
+    // its neighbours off screen — leave at least MIN for the target and MIN for
+    // whatever shares the container with it.
+    const MIN = 120;
+    const parent = target.parentElement;
+    const room = axis === "y" ? parent.clientHeight : parent.clientWidth;
+    const size = Math.max(MIN, Math.min(startSize + delta, room - MIN));
     if (axis === "y") target.style.height = size + "px";
     else target.style.flex = `0 0 ${size}px`;
   };

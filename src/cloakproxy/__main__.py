@@ -135,38 +135,32 @@ def _window(url: str, port: int) -> bool:
     # runtime is up (no fetch, no modules), so the window shows the loading
     # screen straight away instead of a blank "not responding" frame. Once it's
     # shown we navigate to the real interface.
-    # A native splash covers the gap the inline one can't: WebView2's runtime
-    # initialisation, during which its window can't paint anything and the OS
-    # calls it "not responding". A separate little window shows through that.
-    splash = _spawn_native_splash()
+    # A native splash covers WebView2's runtime start, during which its own window
+    # can't paint anything and the OS calls it "not responding". It's a separate
+    # process, so it shows and animates regardless, and it closes itself the moment
+    # the interface actually connects (it polls /api/ready) — no guessing.
+    splash = _spawn_native_splash(url)
 
+    # Point straight at the app. The earlier splash→load_url hop added a second
+    # navigation freeze; the native splash and the page's own #splash cover the
+    # wait without it.
     bridge.window = webview.create_window(
-        f"Cloak — proxy :{port}", html=_SPLASH_HTML, width=1500, height=940,
+        f"Cloak — proxy :{port}", url, width=1500, height=940,
         min_size=(1000, 640), js_api=bridge)
-
-    def _to_app(window) -> None:
-        # WebView2 is alive now (this runs on its loop), so its own window can
-        # paint — drop the native splash and go to the interface.
-        if splash is not None and splash.poll() is None:
-            try:
-                splash.terminate()
-            except Exception:  # pylint: disable=broad-except
-                pass
-        window.load_url(url)
-
     try:
-        webview.start(_to_app, bridge.window, icon=str(ICON) if ICON.exists() else None)
+        webview.start(icon=str(ICON) if ICON.exists() else None)
     finally:
         if splash is not None and splash.poll() is None:
             splash.terminate()
     return True
 
 
-def _spawn_native_splash():
+def _spawn_native_splash(app_url: str):
     """A borderless loading window in its own process, shown while WebView2 boots.
 
-    tkinter, not WebView2, so it paints instantly and keeps animating no matter
-    what this process's main thread is doing. Killed once the real window can draw.
+    tkinter, not WebView2, so it paints instantly and animates no matter what this
+    process's main thread is doing. It closes itself once /api/ready reports the
+    interface has connected, or after a hard 60s cap.
     """
     import subprocess  # pylint: disable=import-outside-toplevel
     exe = sys.executable or ""
@@ -174,8 +168,10 @@ def _spawn_native_splash():
     interp = str(pyw) if pyw.exists() else exe
     if not interp:
         return None
+    ready_url = app_url.rstrip("/") + "/api/ready"
     code = (
-        "import tkinter as tk\n"
+        "import tkinter as tk,threading,json,time\n"
+        "import urllib.request as u\n"
         "r=tk.Tk();r.overrideredirect(True);r.configure(bg='#101116')\n"
         "w,h=300,150;sw,sh=r.winfo_screenwidth(),r.winfo_screenheight()\n"
         "r.geometry('%dx%d+%d+%d'%(w,h,(sw-w)//2,(sh-h)//2))\n"
@@ -189,9 +185,23 @@ def _spawn_native_splash():
         "x=[0]\n"
         "def a():\n x[0]=(x[0]+7)%270;c.coords(b,x[0]-60,0,x[0],3);r.after(16,a)\n"
         "a()\n"
-        "r.after(40000,r.destroy)\n"       # never linger more than 40s
+        "done=[False]\n"
+        "def watch():\n"
+        " end=time.time()+60\n"
+        " while time.time()<end:\n"
+        "  try:\n"
+        "   d=json.load(u.urlopen('%s',timeout=2))\n"
+        "   if d.get('ui',0)>0: break\n"
+        "  except Exception: pass\n"
+        "  time.sleep(0.3)\n"
+        " done[0]=True\n"
+        "threading.Thread(target=watch,daemon=True).start()\n"
+        "def chk():\n"
+        " if done[0]: r.destroy()\n"
+        " else: r.after(150,chk)\n"
+        "chk()\n"
         "r.mainloop()\n"
-    )
+    ) % ready_url
     try:
         flags = 0x08000000 if sys.platform == "win32" else 0   # CREATE_NO_WINDOW
         return subprocess.Popen([interp, "-c", code], creationflags=flags)
