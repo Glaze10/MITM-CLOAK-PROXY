@@ -95,12 +95,39 @@ class Bridge:
         return {"ok": True, "path": path}
 
 
+def _make_dpi_aware() -> None:
+    """Render at the display's real resolution, not stretched.
+
+    A DPI-unaware process is drawn at 96 DPI and bitmap-scaled up by Windows on
+    a 125%/150% display, so the text is soft on screen and a screenshot captures
+    that softness. Declaring per-monitor awareness (v2, then older fallbacks)
+    lets WebView2 draw crisply. Must run before any window exists.
+    """
+    if sys.platform != "win32":
+        return
+    import ctypes  # pylint: disable=import-outside-toplevel
+    try:
+        # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 (Win10 1703+)
+        if ctypes.windll.user32.SetProcessDpiAwarenessContext(-4):
+            return
+    except Exception:  # pylint: disable=broad-except
+        pass
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)   # per-monitor (Win8.1+)
+    except Exception:  # pylint: disable=broad-except
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()     # system-DPI (Vista+)
+        except Exception:  # pylint: disable=broad-except
+            pass
+
+
 def _window(url: str, port: int) -> bool:
     """A real window if pywebview is around, otherwise the default browser."""
     try:
         import webview  # pylint: disable=import-outside-toplevel
     except ImportError:
         return False
+    _make_dpi_aware()
     _claim_taskbar_identity()
     bridge = Bridge()
     # the title says what this window is for; pywebview otherwise takes the
