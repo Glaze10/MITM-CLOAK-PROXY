@@ -154,6 +154,9 @@ class Recorder:
         self.intercept_filter = ""      # substring of the URL; empty means everything
         self.paused: dict[str, http.HTTPFlow] = {}
         self._blobs: dict[str, tuple[bool, str]] = {}   # id -> (had_response, search text)
+        # Repeater sends are replays: kept here, reachable by id so the repeater
+        # can read the reply, but never shown in history or counted as capture.
+        self.replays: "OrderedDict[str, http.HTTPFlow]" = OrderedDict()
 
     # ── storage ──────────────────────────────────────────────────────────────
     def _keep(self, flow: http.HTTPFlow) -> None:
@@ -164,7 +167,13 @@ class Recorder:
             self.paused.pop(old, None)
 
     def get(self, flow_id: str) -> Optional[http.HTTPFlow]:
-        return self.flows.get(flow_id)
+        return self.flows.get(flow_id) or self.replays.get(flow_id)
+
+    def _keep_replay(self, flow: http.HTTPFlow) -> None:
+        self.replays[flow.id] = flow
+        self.replays.move_to_end(flow.id)
+        while len(self.replays) > 200:      # a small rolling buffer is plenty
+            self.replays.popitem(last=False)
 
     def search_blob(self, flow: http.HTTPFlow) -> str:
         """The whole flow as one lowercased string, for full-text search.
@@ -228,6 +237,7 @@ class Recorder:
         self.flows.clear()
         self.paused.clear()
         self._blobs.clear()
+        self.replays.clear()
 
     def matches_intercept(self, flow: http.HTTPFlow) -> bool:
         if not self.intercept_enabled:
@@ -237,6 +247,9 @@ class Recorder:
 
     # ── mitmproxy hooks ──────────────────────────────────────────────────────
     def request(self, flow: http.HTTPFlow) -> None:
+        if flow.is_replay:                  # a repeater send — not history, not intercept
+            self._keep_replay(flow)
+            return
         self._keep(flow)
         if self.matches_intercept(flow):
             # park it: mitmproxy holds the connection open until we resume or kill
@@ -247,10 +260,16 @@ class Recorder:
         self._emit("request", summarize(flow))
 
     def response(self, flow: http.HTTPFlow) -> None:
+        if flow.is_replay:
+            self._keep_replay(flow)         # the repeater polls for this by id
+            return
         self._keep(flow)
         self._emit("response", summarize(flow))
 
     def error(self, flow: http.HTTPFlow) -> None:
+        if flow.is_replay:
+            self._keep_replay(flow)
+            return
         self._keep(flow)
         self._emit("error", summarize(flow, state="error"))
 
