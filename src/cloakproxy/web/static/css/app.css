@@ -365,3 +365,68 @@ button.addr.copied { color: var(--ok); border-color: var(--ok); }
 .notice button.x { flex: 0 0 auto; margin-left: auto; padding: 0 2px; line-height: 1;
   font-size: 14px; color: var(--dim2); background: none; border: 0; }
 .notice button.x:hover { color: var(--fg); }
+
+/* ══ form controls that stay inside their box ════════════════════════════
+   A flex item defaults to min-width:auto, and a <select> is as wide as its
+   longest option — so the fingerprint picker, whose options are full preset
+   names, pushed straight out through the side of its card. */
+.field input, .field select, .field textarea,
+.row input, .row select, .row textarea, .grow { min-width: 0; }
+select { max-width: 100%; text-overflow: ellipsis; }
+.card, .field, .row { min-width: 0; }
+.field span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* a narrow card stacks the label above its control rather than squeezing it */
+@container (max-width: 330px) {
+  .field { flex-direction: column; align-items: stretch; gap: 4px; }
+  .field span { width: auto; }
+}
+.card { container-type: inline-size; }
+
+/* ══ checkboxes and radios ═══════════════════════════════════════════════
+   The native controls are a different shape, weight and colour on every
+   platform, and next to this palette they read as someone else's widgets.
+   These are drawn to match everything around them. */
+input[type="checkbox"], input[type="radio"] {
+  appearance: none; -webkit-appearance: none;
+  flex: 0 0 auto; width: 15px; height: 15px; margin: 0; padding: 0;
+  position: relative; cursor: pointer; vertical-align: -2px;
+  background: var(--bg); border: 1px solid var(--line2); border-radius: 4px;
+  transition: background-color var(--fast), border-color var(--fast), box-shadow var(--fast);
+}
+input[type="radio"] { border-radius: 50%; }
+input[type="checkbox"]:hover, input[type="radio"]:hover { border-color: var(--accent-dim); }
+
+input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
+input[type="checkbox"]:checked::after {           /* a drawn tick, not a glyph */
+  content: ""; position: absolute; left: 4.5px; top: 1.5px; width: 3px; height: 7px;
+  border: solid #0c1626; border-width: 0 2px 2px 0; border-radius: 1px;
+  transform: rotate(42deg); animation: tick 140ms var(--ease);
+}
+@keyframes tick { from { opacity: 0; transform: rotate(42deg) scale(.6); } }
+
+input[type="radio"]:checked { border-color: var(--accent); background: var(--bg); }
+input[type="radio"]:checked::after {
+  content: ""; position: absolute; inset: 3px; border-radius: 50%;
+  background: var(--accent); animation: tick 140ms var(--ease);
+}
+input[type="checkbox"]:disabled, input[type="radio"]:disabled { opacity: .4; cursor: default; }
+
+/* the labels beside them line up and respond as one target */
+.checks label, label.switch, .choice label { user-select: none; }
+.checks label:hover, label.switch:hover { color: var(--fg); }
+.checks label { padding: 2px 4px; border-radius: 5px; }
+.checks label:hover { background: var(--bg3); }
+
+/* ── the Copy as flyout ──────────────────────────────────────────────── */
+.submenu { position: relative; }
+.submenu > .parent { display: flex; width: 100%; background: none; border: 0;
+  border-radius: 5px; padding: 6px 9px; text-align: left; color: var(--fg); }
+.submenu > .parent .arrow { margin-left: auto; color: var(--dim2); font-size: 15px;
+  line-height: 1; }
+.submenu:hover > .parent { background: var(--bg4); }
+.ctx .flyout { position: absolute; left: calc(100% - 2px); top: -5px;
+  min-width: 178px; display: none; }
+.submenu:hover > .flyout, .flyout:hover { display: block; }
+/* a menu that opens rightwards runs off a narrow window; flip it when it would */
+.ctx.flip-sub .flyout { left: auto; right: calc(100% - 2px); }

@@ -12,6 +12,7 @@ import logging
 import sys
 import threading
 import webbrowser
+from pathlib import Path
 
 import tornado.web
 
@@ -22,14 +23,36 @@ LOG = logging.getLogger("cloak")
 UI_HOST, UI_PORT = "127.0.0.1", 8099
 
 
-def _window(url: str) -> bool:
+ICON = Path(__file__).resolve().parent / "web" / "static" / "cloak.ico"
+
+
+def _claim_taskbar_identity() -> None:
+    """Tell Windows this is its own application, not an instance of Python.
+
+    Without this the window is grouped under pythonw.exe and inherits its icon
+    and its name — which is why it reads as a console someone left running.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes  # pylint: disable=import-outside-toplevel
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Cloak.Proxy")
+    except Exception:  # pylint: disable=broad-except
+        pass          # cosmetic; never worth failing to start over
+
+
+def _window(url: str, port: int) -> bool:
     """A real window if pywebview is around, otherwise the default browser."""
     try:
         import webview  # pylint: disable=import-outside-toplevel
     except ImportError:
         return False
-    webview.create_window("Cloak", url, width=1500, height=940, min_size=(1000, 640))
-    webview.start()
+    _claim_taskbar_identity()
+    # the title says what this window is for; pywebview otherwise takes the
+    # interpreter's own icon, which is the console look
+    webview.create_window(f"Cloak — proxy :{port}", url,
+                          width=1500, height=940, min_size=(1000, 640))
+    webview.start(icon=str(ICON) if ICON.exists() else None)
     return True
 
 
@@ -74,7 +97,7 @@ def main(argv: list[str] | None = None) -> int:
     t.start()
     import time
     time.sleep(1.2)                        # let the server bind before we point at it
-    if not _window(url):
+    if not _window(url, args.port):
         LOG.info("pywebview not installed — opening %s in your browser", url)
         webbrowser.open(url)
         try:

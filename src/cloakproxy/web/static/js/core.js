@@ -67,6 +67,71 @@ export function asCurl(d) {
   return parts.join(" \\\n  ");
 }
 
+/* Other shapes of the same request. Which one is wanted depends entirely on
+   where it goes next — a terminal, a notebook, a PowerShell prompt, a bug
+   report — so Cloak offers the handful that cover almost every case rather
+   than picking one. Content-Length is dropped throughout: every client
+   recomputes it, and a stale one breaks the replay. */
+
+const NL = "\n";
+
+const reqHeaders = (d) =>
+  (d.request.headers || []).filter(([k]) => k.toLowerCase() !== "content-length");
+
+function reqBody(d) {
+  const b = d.request.body || {};
+  return b.text && b.encoding !== "base64" ? b.text : "";
+}
+
+export function asPowerShell(d) {
+  const headers = reqHeaders(d)
+    .map(([k, v]) => `  '${k}' = '${String(v).replace(/'/g, "''")}'`).join(NL);
+  const body = reqBody(d);
+  const out = [`$headers = @{${NL}${headers}${NL}}`];
+  if (body) out.push(`$body = @'${NL}${body}${NL}'@`);
+  out.push(`Invoke-WebRequest -Uri '${d.request.url}' -Method ${d.request.method}` +
+           ` -Headers $headers${body ? " -Body $body" : ""}`);
+  return out.join(NL + NL);
+}
+
+export function asPython(d) {
+  const headers = reqHeaders(d)
+    .map(([k, v]) => `    ${JSON.stringify(k)}: ${JSON.stringify(String(v))},`).join(NL);
+  const body = reqBody(d);
+  const out = ["import requests", "", `headers = {${NL}${headers}${NL}}`];
+  if (body) out.push(`data = ${JSON.stringify(body)}`);
+  out.push("", `response = requests.request(${JSON.stringify(d.request.method)}, ` +
+                `${JSON.stringify(d.request.url)}, headers=headers` +
+                (body ? ", data=data" : "") + ")",
+           "print(response.status_code)", "print(response.text)");
+  return out.join(NL);
+}
+
+export function asFetch(d) {
+  const init = {
+    method: d.request.method,
+    headers: Object.fromEntries(reqHeaders(d).map(([k, v]) => [k, String(v)])),
+  };
+  const body = reqBody(d);
+  if (body) init.body = body;
+  return `await fetch(${JSON.stringify(d.request.url)}, ${JSON.stringify(init, null, 2)});`;
+}
+
+export function asRawRequest(d) {
+  const lines = [`${d.request.method} ${d.request.url} ${d.request.http_version}`];
+  for (const [k, v] of d.request.headers || []) lines.push(`${k}: ${v}`);
+  return lines.join(NL) + NL + NL + ((d.request.body || {}).text || "");
+}
+
+export function asRawResponse(d) {
+  if (!d.response) return d.error ? `(failed) ${d.error}` : "(no response)";
+  const lines = [`${d.response.http_version} ${d.response.status} ${d.response.reason || ""}`];
+  for (const [k, v] of d.response.headers || []) lines.push(`${k}: ${v}`);
+  return lines.join(NL) + NL + NL + ((d.response.body || {}).text || "");
+}
+
+export const asResponseBody = (d) => ((d.response || {}).body || {}).text || "";
+
 export async function copy(text, what = "Copied") {
   try {
     await navigator.clipboard.writeText(text);

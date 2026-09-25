@@ -1,5 +1,8 @@
 /* The history table: rendering, selection, highlighting, and the right-click menu. */
-import { $, $$, api, asCurl, copy, esc, fmtSize, MARKS, state, toast } from "./core.js";
+import {
+  $, $$, api, asCurl, asFetch, asPowerShell, asPython, asRawRequest, asRawResponse,
+  asResponseBody, copy, esc, fmtSize, MARKS, state, toast,
+} from "./core.js";
 import { showDetail } from "./detail.js";
 import { addRepeaterTab } from "./repeater.js";
 
@@ -180,6 +183,22 @@ export async function markSelection(colour) {
 }
 
 /* ── context menu ────────────────────────────────────────────────────── */
+/* Which format is wanted depends on where the request is going next, so the
+   menu offers the handful that cover it rather than guessing. */
+const COPY_AS = [
+  ["curl", "cURL"],
+  ["powershell", "PowerShell"],
+  ["python", "Python requests"],
+  ["fetch", "JavaScript fetch"],
+  ["raw", "Raw request"],
+  ["response", "Raw response"],
+  ["body", "Response body"],
+];
+
+const FORMATTERS = {
+  curl: asCurl, powershell: asPowerShell, python: asPython, fetch: asFetch,
+  raw: asRawRequest, response: asRawResponse, body: asResponseBody,
+};
 function closeCtx() { $("#ctx").classList.add("hidden"); }
 
 function openCtx(x, y, id) {
@@ -206,8 +225,14 @@ function openCtx(x, y, id) {
     ${parked ? `<button data-act="forward">Forward</button>
                 <button data-act="drop">Drop</button>` : ""}
     <div class="sep"></div>
+    <div class="submenu">
+      <button class="parent">Copy as<span class="arrow">›</span></button>
+      <div class="ctx flyout">
+        ${COPY_AS.map(([key, label]) =>
+          `<button data-act="copy:${key}">${label}${n > 1 ? ` (${n})` : ""}</button>`).join("")}
+      </div>
+    </div>
     <button data-act="copy-url">Copy URL${n > 1 ? "s" : ""}</button>
-    <button data-act="copy-curl">Copy as curl</button>
     <button data-act="export">Export ${n > 1 ? `these ${n}` : "this"} as HAR</button>
     <div class="sep"></div>
     <button data-act="select-host">Select all from this host</button>
@@ -215,6 +240,8 @@ function openCtx(x, y, id) {
   ctx.style.left = Math.min(x, window.innerWidth - 240) + "px";
   ctx.style.top = Math.min(y, window.innerHeight - ctx.offsetHeight - 20) + "px";
   ctx.classList.remove("hidden");
+  // open the submenu to whichever side has room for it
+  ctx.classList.toggle("flip-sub", x + 240 + 178 > window.innerWidth);
 }
 
 async function runCtxAction(act, id) {
@@ -230,9 +257,14 @@ async function runCtxAction(act, id) {
     toast(act === "forward" ? "Forwarded" : "Dropped");
   } else if (act === "copy-url") {
     copy(ids.map((i) => (state.flows.get(i) || {}).url).join("\n"), `Copied ${ids.length} URL(s)`);
-  } else if (act === "copy-curl") {
-    const d = await api(`/api/flows/${id}`);
-    copy(asCurl(d), "Copied as curl");
+  } else if (act.startsWith("copy:")) {
+    // the row only carries a summary, so fetch the whole flow to format it
+    const key = act.slice(5);
+    const label = (COPY_AS.find(([k]) => k === key) || [key, key])[1];
+    const full = await Promise.all(ids.slice(0, 50).map((i) => api(`/api/flows/${i}`)));
+    const text = full.map(FORMATTERS[key]).filter(Boolean).join("\n\n");
+    if (!text) return toast(`Nothing to copy as ${label}`, true);
+    copy(text, `Copied ${ids.length > 1 ? `${ids.length} flows` : ""} as ${label}`);
   } else if (act === "export") {
     window.location = `/api/har?name=cloak-selection.har&ids=${ids.join(",")}`;
   } else if (act === "select-host") {

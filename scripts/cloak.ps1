@@ -56,7 +56,9 @@ if ($Shortcut) {
   $s.TargetPath = $Pyw
   $s.Arguments = "-m cloakproxy --port $Port --ui-port $UiPort --mode $Mode --preset $Preset"
   $s.WorkingDirectory = (Join-Path $Root 'src')
-  $s.IconLocation = "$env:SystemRoot\System32\netshell.dll,85"
+  # the app's own icon, so the shortcut, the taskbar and the window agree
+  $ico = Join-Path $Root 'src\cloakproxy\web\static\cloak.ico'
+  if (Test-Path $ico) { $s.IconLocation = $ico } else { $s.IconLocation = "$Pyw,0" }
   $s.Description = 'Cloak - intercepting proxy with a real browser TLS fingerprint'
   $s.WindowStyle = 7                  # minimised, in case a console ever appears
   $s.Save()

@@ -331,6 +331,18 @@ class CloakHandler(Base):
                    "notices": self.proxy.notices.as_list()})
 
 
+class FaviconHandler(tornado.web.RequestHandler):
+    """Browsers ask for this by name whatever the page links to."""
+
+    def get(self) -> None:
+        icon = STATIC / "cloak.ico"
+        if not icon.exists():
+            raise tornado.web.HTTPError(404)
+        self.set_header("Content-Type", "image/x-icon")
+        self.set_header("Cache-Control", "no-cache")
+        self.write(icon.read_bytes())
+
+
 class FreshStatic(tornado.web.StaticFileHandler):
     """Serve the interface without letting the window cache an old copy.
 
@@ -385,6 +397,7 @@ def make_app(proxy: ProxyManager, hub: Hub) -> tornado.web.Application:
             (r"/api/projects", ProjectsHandler, common),
             (r"/api/cert", CertHandler, common),
             (r"/ws", EventSocket, dict(hub=hub, proxy=proxy)),
+            (r"/favicon\.ico", FaviconHandler),
             (r"/static/(.*)", FreshStatic, {"path": str(STATIC)}),
         ],
         template_path=str(STATIC),
