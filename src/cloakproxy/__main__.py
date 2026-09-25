@@ -130,13 +130,42 @@ def _window(url: str, port: int) -> bool:
     _make_dpi_aware()
     _claim_taskbar_identity()
     bridge = Bridge()
-    # the title says what this window is for; pywebview otherwise takes the
-    # interpreter's own icon, which is the console look
+    # Start on a tiny inline splash rather than the app URL. WebView2's first
+    # paint is the slow part; a self-contained page paints the instant the
+    # runtime is up (no fetch, no modules), so the window shows the loading
+    # screen straight away instead of a blank "not responding" frame. Once it's
+    # shown we navigate to the real interface.
     bridge.window = webview.create_window(
-        f"Cloak — proxy :{port}", url, width=1500, height=940,
+        f"Cloak — proxy :{port}", html=_SPLASH_HTML, width=1500, height=940,
         min_size=(1000, 640), js_api=bridge)
-    webview.start(icon=str(ICON) if ICON.exists() else None)
+
+    def _to_app(window) -> None:
+        window.load_url(url)
+
+    webview.start(_to_app, bridge.window, icon=str(ICON) if ICON.exists() else None)
     return True
+
+
+_SPLASH_HTML = """<!doctype html><html><head><meta charset="utf-8"><style>
+  html,body{height:100%;margin:0;background:#101116;color:#dcdce4;
+    font-family:"Segoe UI",system-ui,sans-serif;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:12px}
+  .m{width:46px;height:46px;border-radius:12px;background:#161a26;position:relative;
+    box-shadow:0 8px 30px rgba(0,0,0,.4)}
+  .m::before{content:"";position:absolute;inset:10px 10px 0;border-radius:50% 50% 0 0;
+    border:3px solid #6fb0ff;border-bottom:0}
+  .m::after{content:"";position:absolute;left:50%;top:24px;width:10px;height:10px;
+    border-radius:50%;background:#6fb0ff;transform:translateX(-50%)}
+  .t{font-weight:700;letter-spacing:.5px;font-size:16px}
+  .s{color:#6d7285;font-size:12px}
+  .b{width:200px;height:3px;border-radius:3px;background:#252734;overflow:hidden}
+  .b span{display:block;height:100%;width:40%;border-radius:3px;background:#6fb0ff;
+    animation:sl 1.1s ease-in-out infinite}
+  @keyframes sl{0%{transform:translateX(-120%)}100%{transform:translateX(320%)}}
+</style></head><body>
+  <div class="m"></div><div class="t">Cloak Proxy</div>
+  <div class="s">Starting…</div><div class="b"><span></span></div>
+</body></html>"""
 
 
 async def _serve(args: argparse.Namespace) -> None:
