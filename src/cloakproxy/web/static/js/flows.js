@@ -200,7 +200,17 @@ function schedulePaint() {
 export function renderFlows() { paint(); }
 
 /** Re-style rows after a selection or highlight change — just repaint the slice. */
-export function repaintRows() { paint(); }
+/** Re-style the rows already on screen — for selection and highlight changes,
+    which don't move the scroll window, so paint()'s skip would ignore them. */
+export function repaintRows() {
+  const body = $("#rows");
+  for (const tr of body.children) {
+    const id = tr.dataset.id;
+    const f = id && state.flows.get(id);
+    if (f) fillRow(tr, f);
+  }
+  paintCounts();
+}
 
 export function setFlows(rows) {
   state.flows = new Map(rows.map((r) => [r.id, r]));
