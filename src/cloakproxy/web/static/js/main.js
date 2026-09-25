@@ -109,6 +109,18 @@ function initHistoryBar() {
   };
 }
 
+/* A desktop window has no address bar to reload from, and the interface is
+   served fresh on every request — so the shortcut everyone already reaches for
+   should work here too. */
+function initReload() {
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "F5" || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "r")) {
+      e.preventDefault();
+      location.reload();
+    }
+  });
+}
+
 /* ── live events ─────────────────────────────────────────────────────── */
 function connect() {
   const ws = new WebSocket(`ws://${location.host}/ws`);
@@ -141,6 +153,7 @@ function connect() {
   initRules();
   initRepeater();
   initSettings();
+  initReload();
 
   paintState(await api("/api/state"));
   await Promise.all([loadFlows(), loadRules(), refreshCloakStats(), loadTls()]);
