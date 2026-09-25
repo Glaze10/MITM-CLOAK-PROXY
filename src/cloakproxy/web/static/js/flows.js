@@ -528,6 +528,37 @@ export function initFlows() {
     const tr = e.target.closest("tr[data-id]");
     if (tr) selectRow(tr.dataset.id, e);
   });
+
+  // Click-and-drag to select a range of rows. The range is computed from
+  // state.order by index, so it works even across rows that virtual scrolling
+  // hasn't rendered.
+  let dragging = false, dragAnchor = null;
+  const rangeTo = (id) => {
+    const a = state.order.indexOf(dragAnchor), b = state.order.indexOf(id);
+    if (a < 0 || b < 0) return;
+    state.selected = new Set(state.order.slice(Math.min(a, b), Math.max(a, b) + 1));
+    repaintRows();
+  };
+  $("#rows").addEventListener("mousedown", (e) => {
+    if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return;  // click handles those
+    const tr = e.target.closest("tr[data-id]");
+    if (!tr) return;
+    dragging = true; dragAnchor = tr.dataset.id; state.anchor = dragAnchor;
+    state.selected = new Set([dragAnchor]);
+    repaintRows();
+    e.preventDefault();                     // no text selection while dragging
+  });
+  $("#rows").addEventListener("mouseover", (e) => {
+    if (!dragging) return;
+    const tr = e.target.closest("tr[data-id]");
+    if (tr) rangeTo(tr.dataset.id);
+  });
+  document.addEventListener("mouseup", () => {
+    if (!dragging) return;
+    dragging = false;
+    if (state.selected.size === 1) showDetail([...state.selected][0]);
+  });
+
   $("#rows").addEventListener("contextmenu", (e) => {
     const tr = e.target.closest("tr[data-id]");
     if (!tr) return;
