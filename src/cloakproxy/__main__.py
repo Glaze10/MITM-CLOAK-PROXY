@@ -135,16 +135,7 @@ def _window(url: str, port: int) -> bool:
     bridge.window = webview.create_window(
         f"Cloak — proxy :{port}", url, width=1500, height=940,
         min_size=(1000, 640), js_api=bridge)
-    # A persistent WebView2 profile instead of the default throwaway one. Private
-    # mode rebuilds a fresh profile on every launch, which on Windows can leave
-    # the window unresponsive for a while as WebView2 initialises it from cold.
-    store = Path.home() / ".cloak" / "webview"
-    try:
-        store.mkdir(parents=True, exist_ok=True)
-    except Exception:  # pylint: disable=broad-except
-        pass
-    webview.start(icon=str(ICON) if ICON.exists() else None,
-                  private_mode=False, storage_path=str(store))
+    webview.start(icon=str(ICON) if ICON.exists() else None)
     return True
 
 
@@ -181,22 +172,79 @@ def main(argv: list[str] | None = None) -> int:
         asyncio.run(_serve(args))
         return 0
 
-    # the UI thread owns the window; the proxy owns its own loop on this thread
-    def _backend() -> None:
-        asyncio.run(_serve(args))
+    # The server and the proxy run in their OWN process, not a thread of the
+    # window's. A window and a server sharing one process share one GIL, and
+    # WebView2's UI loop then starves the server — the window (and everything the
+    # proxy is doing) goes unresponsive whenever the interface is busy. As
+    # separate processes they don't compete: the window can be busy and the proxy
+    # keeps capturing and answering at full speed.
+    return _run_windowed(args, url)
 
-    t = threading.Thread(target=_backend, daemon=True, name="cloak-backend")
-    t.start()
-    import time
-    time.sleep(1.2)                        # let the server bind before we point at it
-    if not _window(url, args.port):
-        LOG.info("pywebview not installed — opening %s in your browser", url)
-        webbrowser.open(url)
-        try:
-            t.join()
-        except KeyboardInterrupt:
-            pass
+
+def _run_windowed(args: argparse.Namespace, url: str) -> int:
+    import time  # pylint: disable=import-outside-toplevel
+
+    server = _spawn_server(args)
+    if server is None:                     # no separate interpreter? fall back to a thread
+        def _backend() -> None:
+            asyncio.run(_serve(args))
+        threading.Thread(target=_backend, daemon=True, name="cloak-backend").start()
+        time.sleep(1.2)
+    else:
+        _await_server(args.ui_port)
+
+    try:
+        if not _window(url, args.port):
+            LOG.info("pywebview not installed — opening %s in your browser", url)
+            webbrowser.open(url)
+            if server is not None:
+                server.wait()
+            else:
+                while True:
+                    time.sleep(3600)
+    finally:
+        if server is not None and server.poll() is None:
+            server.terminate()             # window closed → stop the server too
+            try:
+                server.wait(timeout=5)
+            except Exception:  # pylint: disable=broad-except
+                server.kill()
     return 0
+
+
+def _spawn_server(args: argparse.Namespace):
+    """Start the UI+proxy as a child process. Returns the Popen, or None."""
+    import subprocess  # pylint: disable=import-outside-toplevel
+    exe = sys.executable or ""
+    # use the windowless interpreter so no console flashes up
+    pyw = Path(exe).with_name("pythonw.exe")
+    interp = str(pyw) if pyw.exists() else exe
+    if not interp:
+        return None
+    cmd = [interp, "-m", "cloakproxy", "--no-window",
+           "--ui-port", str(args.ui_port), "--port", str(args.port),
+           "--mode", args.mode, "--preset", args.preset]
+    if not args.start:
+        cmd.append("--no-start")
+    try:
+        flags = 0x08000000 if sys.platform == "win32" else 0   # CREATE_NO_WINDOW
+        return subprocess.Popen(cmd, creationflags=flags)
+    except Exception as exc:  # pylint: disable=broad-except
+        LOG.warning("couldn't start the server process (%s); running in-thread", exc)
+        return None
+
+
+def _await_server(ui_port: int, timeout: float = 30.0) -> None:
+    """Wait until the child server answers, so the window never opens onto a void."""
+    import time  # pylint: disable=import-outside-toplevel
+    import urllib.request  # pylint: disable=import-outside-toplevel
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(f"http://{UI_HOST}:{ui_port}/api/state", timeout=2):
+                return
+        except Exception:  # pylint: disable=broad-except
+            time.sleep(0.3)
 
 
 if __name__ == "__main__":
