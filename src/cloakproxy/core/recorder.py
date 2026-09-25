@@ -73,14 +73,23 @@ def summarize(flow: http.HTTPFlow, *, state: str = "") -> dict[str, Any]:
     }
 
 
+# Set by the proxy once the cloak's addon exists: says which client a mirrored
+# fingerprint was recognised as, so a flow reads "chrome-151-windows" rather
+# than "mc-6b4ed3697900". Empty when the client wasn't recognised — the mirror
+# still carries its real handshake, there's just no name for it.
+name_preset: Callable[[str, Any], str] = lambda name, flow=None: name
+
+
 def cloak_info(flow: http.HTTPFlow) -> dict[str, Any]:
     """mitmcloak's own record of the upstream leg, if it handled this one."""
     meta = (flow.metadata or {}).get("mitmcloak") or {}
     if not meta:
         return {}
+    preset = meta.get("preset") or ""
     return {
         "via": meta.get("via", ""),          # "mirror" = the client's own handshake
-        "preset": meta.get("preset") or "",  # the identity used when it wasn't mirrored
+        "preset": preset,                    # the exact identity, minted or built in
+        "label": name_preset(preset, flow),  # what that identity is, in readable form
         "upstream": meta.get("upstream") or "",
         "ms": meta.get("ms"),
     }

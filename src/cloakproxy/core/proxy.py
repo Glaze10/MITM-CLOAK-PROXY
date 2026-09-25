@@ -16,6 +16,7 @@ from typing import Any, Callable, Optional
 from mitmproxy import options
 from mitmproxy.tools.dump import DumpMaster
 
+from cloakproxy.core import recorder as recorder_mod
 from cloakproxy.core.recorder import Recorder
 from cloakproxy.core.rules import MatchReplace
 
@@ -129,6 +130,9 @@ class ProxyManager:
         self.allow_hosts = ""
         self.error: str = ""
         self.notices = Notices()
+        self.bridge: Any = None
+        self._labels: dict[str, str] = {}
+        recorder_mod.name_preset = self.preset_label
         logging.getLogger().addHandler(self.notices)
 
     @property
@@ -220,11 +224,13 @@ class ProxyManager:
             self.master.addons.remove(errorcheck)
 
         from mitmcloak import Bridge  # pylint: disable=import-outside-toplevel
+        self.bridge = Bridge()
+        self._labels.clear()
         # Order matters. The cloak's bridge performs the upstream request itself, so
         # a rewrite registered after it would be recorded as a "hit" and still go out
         # unchanged. Rules first, then the bridge, then the recorder — which leaves
         # history showing exactly what left the machine.
-        self.master.addons.add(self.rules, Bridge(), self.recorder)
+        self.master.addons.add(self.rules, self.bridge, self.recorder)
         # the cloak's options only exist once its addon is loaded
         update: dict[str, Any] = {"mitmcloak_mode": self.mode,
                                   "mitmcloak_preset": self.preset}
@@ -265,6 +271,44 @@ class ProxyManager:
                 return self.state()
         self.emit("proxy", self.state())
         return self.state()
+
+    def preset_label(self, name: str, flow: Any = None) -> str:
+        """Say which client a fingerprint is, not which hash it hashed to.
+
+        A mirrored identity is minted per client and named for its digest —
+        mc-6b4ed3697900 — which is exact and unreadable. The cloak recognises
+        most stacks by their ClientHello, and that name ("chrome-151-windows")
+        is the answer to the question this column is really asking.
+
+        It answers with nothing when the stack wasn't recognised. The preset the
+        mirror was *built* from is only a base for headers and H2 settings, and
+        for an unknown client that's whatever the fallback happens to be —
+        labelling a Python script "ios-safari-18" would be worse than saying
+        nothing, because the bytes on the wire are still the script's own.
+        """
+        if not name:
+            return ""
+        if not name.startswith("mc-"):
+            return name                       # a built-in preset names itself
+        if name in self._labels:
+            return self._labels[name]
+        label = ""
+        try:
+            conn = getattr(getattr(flow, "client_conn", None), "id", None)
+            profile = self.bridge._profiles.get(conn) if conn else None
+            # Recognised by its handshake? Then the cloak already worked out which
+            # build this is, including the platform, which it takes from the
+            # User-Agent — Chrome on Android and on Windows share a TLS stack, so
+            # the handshake alone would call an Android phone "windows".
+            if profile is not None and self.bridge.identifier.match(profile.hello.family_id):
+                doc = self.bridge.mirror.document(name) or {}
+                spec = doc.get("preset") if isinstance(doc.get("preset"), dict) else {}
+                label = doc.get("based_on") or spec.get("based_on") or ""
+        except Exception:  # pylint: disable=broad-except
+            label = ""                        # a private corner of the cloak
+        if label:
+            self._labels[name] = label        # one digest is one client stack
+        return label
 
     async def configure(self, *, mode: Optional[str] = None, preset: Optional[str] = None,
                         allow_hosts: Optional[str] = None,

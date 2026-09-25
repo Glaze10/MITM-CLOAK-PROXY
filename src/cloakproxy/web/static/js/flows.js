@@ -46,14 +46,17 @@ function fillRow(tr, f) {
   set(5, f.mime || "");
   set(6, fmtSize(f.size));
   set(7, f.ms != null ? f.ms + " ms" : "");
-  // The column names the identity that actually went out — "mirror" says how it
-  // was chosen, not what the origin saw, and what the origin saw is the point.
+  // The column names which client this is, not the digest of its handshake.
+  // A stack the cloak doesn't recognise has no name to give — saying so is
+  // better than showing a hash or, worse, the preset it fell back to.
   const cloak = f.cloak || {};
-  set(8, cloak.preset || "", "tls-" + via);
+  const label = cloak.label || (cloak.preset ? "unrecognised" : "");
+  set(8, label, "tls-" + via + (cloak.label ? "" : " tls-unknown"));
   const title = cloak.preset
-    ? `${cloak.preset} — ${via === "mirror" ? "mirrored from this client's own handshake"
-                                            : "a preset, in place of the client's"}` +
-      (cloak.upstream ? ` · ${cloak.upstream}` : "")
+    ? (cloak.label ? `${cloak.label} — ` : "This client's stack wasn't recognised. ") +
+      (via === "mirror" ? "mirrored from its own handshake" : "a preset, in place of the client's") +
+      `
+${cloak.preset}${cloak.upstream ? ` · ${cloak.upstream}` : ""}`
     : "";
   if (td[8].title !== title) td[8].title = title;
   noteIdentity(cloak);
@@ -64,7 +67,7 @@ function noteIdentity(cloak) {
   if (!cloak.preset || !cloak.via) return;
   const last = state.lastTls;
   if (last && last.preset === cloak.preset && last.via === cloak.via) return;
-  state.lastTls = { preset: cloak.preset, via: cloak.via };
+  state.lastTls = { preset: cloak.preset, via: cloak.via, label: cloak.label || "" };
   // settings.js owns the title bar; an event keeps the two from importing
   // each other in a circle
   document.dispatchEvent(new CustomEvent("cloak:identity"));

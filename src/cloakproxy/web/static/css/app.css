@@ -448,3 +448,5 @@ input[type="checkbox"]:disabled, input[type="radio"]:disabled { opacity: .4; cur
 .portRow .x:disabled { opacity: .25; cursor: default; }
 button.addPort { color: var(--dim); border-style: dashed; }
 button.addPort:hover { color: var(--accent); border-color: var(--accent-dim); border-style: solid; }
+
+td.tls-unknown { color: var(--dim2); font-style: italic; }

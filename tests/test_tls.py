@@ -116,3 +116,46 @@ def test_the_quoted_port_is_one_that_is_actually_listening():
     pm.ports = [{"port": 8080, "on": False}]
     assert pm.listening == [] and pm._modes() == []
     assert pm.port == 8080                      # something still has to be quoted
+
+
+class _FakeBridge:
+    """Stands in for the cloak's addon: a client it knows, and one it doesn't."""
+
+    def __init__(self, recognised):
+        self._recognised = recognised
+        self._profiles = {"conn-1": type("P", (), {"hello": type("H", (), {
+            "family_id": "fam-1"})()})()}
+        self.identifier = self
+        self.mirror = self
+
+    def match(self, family_id):                    # identifier.match
+        return "chrome-151-windows" if self._recognised else None
+
+    def document(self, name):                      # mirror.document
+        return {"version": 1, "preset": {"name": name, "based_on": "chrome-151-android"}}
+
+
+class _FakeFlow:
+    client_conn = type("C", (), {"id": "conn-1"})()
+
+
+def test_a_built_in_preset_names_itself():
+    pm = ProxyManager(lambda *a: None)
+    assert pm.preset_label("chrome-151", _FakeFlow()) == "chrome-151"
+    assert pm.preset_label("", _FakeFlow()) == ""
+
+
+def test_a_recognised_client_is_named_by_the_build_the_cloak_chose():
+    pm = ProxyManager(lambda *a: None)
+    pm.bridge = _FakeBridge(recognised=True)
+    # the platform comes from the User-Agent, so the answer is the refined base,
+    # not the TLS family the handshake alone matched
+    assert pm.preset_label("mc-abc123", _FakeFlow()) == "chrome-151-android"
+
+
+def test_an_unrecognised_client_is_not_given_a_name_it_does_not_have():
+    pm = ProxyManager(lambda *a: None)
+    pm.bridge = _FakeBridge(recognised=False)
+    # its handshake is still its own on the wire; there is simply no name for it,
+    # and the fallback preset's name would be a lie
+    assert pm.preset_label("mc-abc123", _FakeFlow()) == ""
