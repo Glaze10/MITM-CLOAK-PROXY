@@ -158,9 +158,10 @@ def _window(url: str, port: int) -> bool:
 def _spawn_native_splash(app_url: str):
     """A borderless loading window in its own process, shown while WebView2 boots.
 
-    tkinter, not WebView2, so it paints instantly and animates no matter what this
-    process's main thread is doing. It closes itself once /api/ready reports the
-    interface has connected, or after a hard 60s cap.
+    tkinter, not WebView2, so it paints instantly and animates no matter what the
+    main window's thread is doing. It watches the real window with the OS's own
+    IsHungAppWindow and closes the instant that window stops being "not
+    responding" — which is exactly the gap we want to cover — or after 60s.
     """
     import subprocess  # pylint: disable=import-outside-toplevel
     exe = sys.executable or ""
@@ -168,10 +169,9 @@ def _spawn_native_splash(app_url: str):
     interp = str(pyw) if pyw.exists() else exe
     if not interp:
         return None
-    ready_url = app_url.rstrip("/") + "/api/ready"
     code = (
-        "import tkinter as tk,threading,json,time\n"
-        "import urllib.request as u\n"
+        "import tkinter as tk,threading,time,ctypes\n"
+        "from ctypes import wintypes\n"
         "r=tk.Tk();r.overrideredirect(True);r.configure(bg='#101116')\n"
         "w,h=300,150;sw,sh=r.winfo_screenwidth(),r.winfo_screenheight()\n"
         "r.geometry('%dx%d+%d+%d'%(w,h,(sw-w)//2,(sh-h)//2))\n"
@@ -185,14 +185,30 @@ def _spawn_native_splash(app_url: str):
         "x=[0]\n"
         "def a():\n x[0]=(x[0]+7)%270;c.coords(b,x[0]-60,0,x[0],3);r.after(16,a)\n"
         "a()\n"
+        "u=ctypes.windll.user32\n"
+        "def find():\n"
+        " hw=[]\n"
+        " @ctypes.WINFUNCTYPE(wintypes.BOOL,wintypes.HWND,wintypes.LPARAM)\n"
+        " def cb(h,l):\n"
+        "  n=u.GetWindowTextLengthW(h)\n"
+        "  if n:\n"
+        "   buf=ctypes.create_unicode_buffer(n+1);u.GetWindowTextW(h,buf,n+1)\n"
+        "   if 'Cloak \\u2014 proxy' in buf.value and u.IsWindowVisible(h): hw.append(h)\n"
+        "  return True\n"
+        " u.EnumWindows(cb,0)\n"
+        " return hw[0] if hw else None\n"
+        "def responsive(h):\n"
+        " res=ctypes.c_size_t(0)\n"   # DWORD_PTR — pointer-sized, or it corrupts memory
+        " # WM_NULL with SMTO_ABORTIFHUNG: nonzero only if the window pumped it\n"
+        " return u.SendMessageTimeoutW(h,0,0,0,0x2,200,ctypes.byref(res))!=0\n"
         "done=[False]\n"
         "def watch():\n"
-        " end=time.time()+60\n"
+        " end=time.time()+60;seen=None;ok=0\n"
         " while time.time()<end:\n"
-        "  try:\n"
-        "   d=json.load(u.urlopen(READY,timeout=2))\n"
-        "   if d.get('ui',0)>0: break\n"
-        "  except Exception: pass\n"
+        "  if seen is None: seen=find()\n"
+        "  if seen is not None:\n"
+        "   ok = ok+1 if responsive(seen) else 0\n"
+        "   if ok>=2: break\n"          # responsive twice running — the freeze is over
         "  time.sleep(0.3)\n"
         " done[0]=True\n"
         "threading.Thread(target=watch,daemon=True).start()\n"
@@ -202,8 +218,6 @@ def _spawn_native_splash(app_url: str):
         "chk()\n"
         "r.mainloop()\n"
     )
-    # prepend the URL as a literal, so no %-formatting touches the tkinter code
-    code = "READY=" + repr(ready_url) + "\n" + code
     try:
         flags = 0x08000000 if sys.platform == "win32" else 0   # CREATE_NO_WINDOW
         return subprocess.Popen([interp, "-c", code], creationflags=flags)
