@@ -190,7 +190,7 @@ def _spawn_native_splash(app_url: str):
         " end=time.time()+60\n"
         " while time.time()<end:\n"
         "  try:\n"
-        "   d=json.load(u.urlopen('%s',timeout=2))\n"
+        "   d=json.load(u.urlopen(READY,timeout=2))\n"
         "   if d.get('ui',0)>0: break\n"
         "  except Exception: pass\n"
         "  time.sleep(0.3)\n"
@@ -201,7 +201,9 @@ def _spawn_native_splash(app_url: str):
         " else: r.after(150,chk)\n"
         "chk()\n"
         "r.mainloop()\n"
-    ) % ready_url
+    )
+    # prepend the URL as a literal, so no %-formatting touches the tkinter code
+    code = "READY=" + repr(ready_url) + "\n" + code
     try:
         flags = 0x08000000 if sys.platform == "win32" else 0   # CREATE_NO_WINDOW
         return subprocess.Popen([interp, "-c", code], creationflags=flags)
