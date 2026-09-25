@@ -24,6 +24,7 @@
   </div>
 
   <div class="spacer"></div>
+  <button id="saveState" class="savestate hidden" title="Click to save now">—</button>
   <button id="btnIntercept" class="pill">Intercept: off</button>
   <button id="btnToggle" class="primary">Start</button>
 </header>
@@ -91,6 +92,12 @@
                 <button class="mini" data-view-mode="raw">Raw</button>
               </div>
               <div class="halfbody" id="reqBody"><p class="empty">Pick a flow.</p></div>
+              <div class="findbar" data-find="reqBody">
+                <input placeholder="Find in request" spellcheck="false">
+                <span class="findcount"></span>
+                <button class="mini" data-find-prev title="Previous (Shift+Enter)">↑</button>
+                <button class="mini" data-find-next title="Next (Enter)">↓</button>
+              </div>
             </div>
             <div class="gutter-v" id="gutterV" title="Drag to resize"></div>
             <div class="half" id="resHalf">
@@ -101,6 +108,20 @@
                 <button class="mini" id="btnToRepeater">Send to Repeater</button>
               </div>
               <div class="halfbody" id="resBody"><p class="empty">—</p></div>
+              <div class="findbar" data-find="resBody">
+                <input placeholder="Find in response" spellcheck="false">
+                <span class="findcount"></span>
+                <button class="mini" data-find-prev title="Previous (Shift+Enter)">↑</button>
+                <button class="mini" data-find-next title="Next (Enter)">↓</button>
+              </div>
+            </div>
+            <div class="gutter-v" id="gutterN" title="Drag to resize"></div>
+            <div class="half notecol" id="noteHalf">
+              <div class="halfbar"><span>Note</span></div>
+              <div class="halfbody">
+                <textarea id="noteEdit" class="noteedit" spellcheck="false"
+                  placeholder="No note. Type here, or right-click the request."></textarea>
+              </div>
             </div>
           </div>
         </div>

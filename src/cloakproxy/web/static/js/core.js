@@ -52,6 +52,9 @@ export const state = {
   proxy: {},                 // last known proxy state
   lastTls: null,             // the identity the most recent connection used
   repeater: [],              // open repeater tabs
+  project: null,             // the open project's name, if any
+  dirty: false,              // changes since the last save
+  savedAt: null,             // when the last save landed
 };
 
 /** Build a curl command from a flow — the one thing everyone copies out. */

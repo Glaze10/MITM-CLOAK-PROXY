@@ -4,6 +4,7 @@
    selector answers it ambiguously. */
 import { $, $$, api, esc, saveBinaryUrl, state, toast } from "./core.js";
 import { loadFlows } from "./flows.js";
+import { openedProject } from "./save.js";
 
 const dismissed = new Set();      // notices this session has been told to stop showing
 
@@ -299,6 +300,7 @@ export function initSettings() {
     if (!name) return toast("Give the project a name", true);
     const r = await api("/api/projects", { method: "POST", body: { action: "save", name } });
     toast(`Saved ${r.project.flows} request${r.project.flows === 1 ? "" : "s"}`);
+    openedProject(name);          // from now on this project autosaves
     loadProjects();
   };
   $("#btnRefreshProjects").onclick = loadProjects;
@@ -308,6 +310,7 @@ export function initSettings() {
     if (open) {
       const r = await api("/api/projects", { method: "POST", body: { action: "load", name: open.dataset.open } });
       toast(`Loaded ${r.flows} request${r.flows === 1 ? "" : "s"}`);
+      openedProject(open.dataset.open);
       await loadFlows();
       document.querySelector('.tabs.top button[data-tab="proxy"]').click();
     } else if (del) {

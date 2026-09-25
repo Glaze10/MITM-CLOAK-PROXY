@@ -109,19 +109,23 @@ class Filter:
         for e in self.exclude:
             if e in url:
                 return False
-        if self.text:
-            hay = f"{method} {url} {status} {mime}"
-            if self.text not in hay.lower():
-                return False
         return True
 
     def needs_bodies(self) -> bool:
-        return bool(self.body)
+        """The quick box and the body field both search the whole exchange now —
+        headers, cookies and both bodies — so either one needs the full text."""
+        return bool(self.body or self.text)
 
-    def body_matches(self, req_text: str, resp_text: str) -> bool:
-        if not self.body:
-            return True
-        return self.body in (req_text or "").lower() or self.body in (resp_text or "").lower()
+    def deep_matches(self, blob: str) -> bool:
+        """`blob` is the flow's whole searchable text, already lowercased: method,
+        url, status, every header (cookies included), and both bodies. The quick
+        box matches anywhere in it; that's what lets a request-body substring be
+        found by typing it."""
+        if self.text and self.text not in blob:
+            return False
+        if self.body and self.body not in blob:
+            return False
+        return True
 
 
 def apply(rows: Iterable[dict[str, Any]], spec: dict[str, Any] | None) -> list[dict[str, Any]]:

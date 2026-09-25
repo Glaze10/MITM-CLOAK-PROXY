@@ -5,14 +5,9 @@ import {
 } from "./core.js";
 import { showDetail } from "./detail.js";
 import { addRepeaterTab } from "./repeater.js";
+import { markDirty } from "./save.js";
 
-/* ── rendering ───────────────────────────────────────────────────────────
-   Rows are kept as live elements and patched in place. Rebuilding the table's
-   innerHTML on every event — twice per request, since a request and its
-   response both arrive — is what made the whole view look like it was
-   reloading itself while traffic came in. */
-const rowEls = new Map();          // flow id -> <tr>
-
+/* ── rendering ─────────────────────────────────────────────────────────── */
 const CELLS = 10;
 
 function rowClass(f) {
@@ -94,6 +89,35 @@ function noteIdentity(cloak) {
   document.dispatchEvent(new CustomEvent("cloak:identity"));
 }
 
+/* ── virtual scrolling ─────────────────────────────────────────────────────
+   A full capture is thousands of requests, and a row is ten cells; putting all
+   of them in the DOM at once (11k nodes for 1000 flows) is what made the window
+   freeze on a loaded project. Only the rows on screen are ever rendered. The
+   rest is height: two spacer rows stand in for everything above and below the
+   window, so the scrollbar and scroll position stay honest. */
+const rowEls = new Map();          // id -> <tr>, only for rows near the viewport
+let ROW_H = 24;                    // measured after the first real row exists
+let spacerTop, spacerBottom;
+let freshId = null;                // the one row that just arrived live
+let scheduled = false;
+
+function ensureSpacers() {
+  const body = $("#rows");
+  if (!spacerTop || spacerTop.parentNode !== body) {
+    body.innerHTML = "";
+    const mk = () => {
+      const tr = document.createElement("tr");
+      tr.className = "spacer";
+      const td = document.createElement("td");
+      td.colSpan = CELLS; td.style.padding = "0"; td.style.border = "0";
+      tr.appendChild(td);
+      return tr;
+    };
+    spacerTop = mk(); spacerBottom = mk();
+    body.appendChild(spacerTop); body.appendChild(spacerBottom);
+  }
+}
+
 function rowFor(id) {
   let tr = rowEls.get(id);
   if (!tr) {
@@ -101,10 +125,9 @@ function rowFor(id) {
     tr.dataset.id = id;
     for (let i = 0; i < CELLS; i++) tr.appendChild(document.createElement("td"));
     rowEls.set(id, tr);
-    tr.classList.add("fresh");     // a brief settle, so new traffic reads as new
-    setTimeout(() => tr.classList.remove("fresh"), 700);
   }
   fillRow(tr, state.flows.get(id) || { id });
+  tr.classList.toggle("fresh", id === freshId);
   return tr;
 }
 
@@ -112,13 +135,8 @@ function atBottom(pane) {
   return pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 40;
 }
 
-function follow(pane, was) {
-  if (state.prefs.follow && was) pane.scrollTop = pane.scrollHeight;
-}
-
 function paintCounts() {
   $("#histCount").textContent = state.order.length;
-  // an empty grid looks broken; say what the proxy is waiting for instead
   $("#noFlows").classList.toggle("hidden", state.order.length > 0);
   const n = state.selected.size;
   const info = $("#selInfo");
@@ -126,62 +144,83 @@ function paintCounts() {
   if (info.textContent !== text) info.textContent = text;
 }
 
-/** Bring the table in line with state.order, touching as little as possible. */
-export function renderFlows() {
+/** Render only the slice of rows visible in the pane, with spacers for the rest. */
+function paint() {
+  scheduled = false;
   const body = $("#rows");
   const pane = $("#flowPane");
-  const was = atBottom(pane);
-  for (const id of rowEls.keys()) if (!state.flows.has(id)) rowEls.delete(id);
-  let i = 0;
-  for (const id of state.order) {
-    const want = rowFor(id);
-    if (body.children[i] !== want) body.insertBefore(want, body.children[i] || null);
-    i++;
+  ensureSpacers();
+  const total = state.order.length;
+
+  const view = pane.clientHeight || 400;
+  const buffer = 10;                                   // rows above/below, for smooth scroll
+  let start = Math.max(0, Math.floor(pane.scrollTop / ROW_H) - buffer);
+  let count = Math.ceil(view / ROW_H) + buffer * 2;
+  let end = Math.min(total, start + count);
+  if (end <= start) { start = 0; end = Math.min(total, count); }
+
+  // clear the current visible rows (keep spacers), then lay out the slice
+  for (const tr of [...body.children]) if (!tr.classList.contains("spacer")) tr.remove();
+  spacerTop.firstChild.style.height = (start * ROW_H) + "px";
+  const frag = document.createDocumentFragment();
+  for (let i = start; i < end; i++) frag.appendChild(rowFor(state.order[i]));
+  body.insertBefore(frag, spacerBottom);
+  spacerBottom.firstChild.style.height = Math.max(0, (total - end) * ROW_H) + "px";
+
+  // trim the element cache so it can't grow without bound on a huge capture
+  if (rowEls.size > count + 200) {
+    const keep = new Set(state.order.slice(start, end));
+    for (const id of rowEls.keys()) if (!keep.has(id)) rowEls.delete(id);
   }
-  while (body.children.length > state.order.length) body.lastChild.remove();
+
+  // learn the true row height once, then correct the layout if it was off
+  if (end > start) {
+    const h = body.querySelector("tr[data-id]")?.offsetHeight;
+    if (h && Math.abs(h - ROW_H) > 1) { ROW_H = h; schedulePaint(); }
+  }
   paintCounts();
-  follow(pane, was);
 }
 
-/** Re-style only the rows whose selection or highlight changed. */
-export function repaintRows(ids) {
-  for (const id of ids || state.order) {
-    const tr = rowEls.get(id), f = state.flows.get(id);
-    if (tr && f) fillRow(tr, f);
-  }
-  paintCounts();
+function schedulePaint() {
+  if (scheduled) return;
+  scheduled = true;
+  requestAnimationFrame(paint);
 }
+
+export function renderFlows() { paint(); }
+
+/** Re-style rows after a selection or highlight change — just repaint the slice. */
+export function repaintRows() { paint(); }
 
 export function setFlows(rows) {
   state.flows = new Map(rows.map((r) => [r.id, r]));
   state.order = rows.map((r) => r.id);
   for (const id of [...state.selected]) if (!state.flows.has(id)) state.selected.delete(id);
-  renderFlows();
+  rowEls.clear();
+  $("#flowPane").scrollTop = 0;
+  paint();
 }
 
 export function upsertFlow(f) {
   const known = state.flows.has(f.id);
   const merged = { ...(state.flows.get(f.id) || {}), ...f };
   state.flows.set(f.id, merged);
-  const body = $("#rows"), pane = $("#flowPane");
+  const pane = $("#flowPane");
   const was = atBottom(pane);
-  if (known) {
-    const tr = rowEls.get(f.id);
-    if (tr) fillRow(tr, merged);
-    else renderFlows();
-  } else {
+  if (!known) {
     state.order.push(f.id);
-    body.appendChild(rowFor(f.id));
+    freshId = f.id;
+    markDirty();
+    setTimeout(() => { if (freshId === f.id) { freshId = null; schedulePaint(); } }, 700);
     const max = state.prefs.maxRows || 2000;
     while (state.order.length > max) {
       const gone = state.order.shift();
       state.flows.delete(gone);
-      rowEls.get(gone)?.remove();
       rowEls.delete(gone);
     }
-    paintCounts();
   }
-  follow(pane, was);
+  paint();
+  if (state.prefs.follow && was) { pane.scrollTop = pane.scrollHeight; paint(); }
   if (state.detail && state.detail.id === f.id) showDetail(f.id);
 }
 
@@ -224,6 +263,7 @@ export async function markSelection(colour) {
     if (f) f.marked = colour || "";
   }
   repaintRows(ids);                       // the colour lands under the cursor
+  markDirty();
   await api("/api/mark", { method: "POST", body: { ids, colour } });
 }
 
@@ -236,6 +276,7 @@ export async function setNote(ids, text) {
   }
   repaintRows(ids);
   if (state.detail && ids.includes(state.detail.id)) state.detail.comment = text || "";
+  markDirty();
   await api("/api/note", { method: "POST", body: { ids, text } });
 }
 
@@ -459,6 +500,9 @@ function initColumns() {
 /* ── wiring ──────────────────────────────────────────────────────────── */
 export function initFlows() {
   initColumns();
+  // repaint the visible slice as the pane scrolls — the heart of virtual scrolling
+  $("#flowPane").addEventListener("scroll", schedulePaint, { passive: true });
+  window.addEventListener("resize", schedulePaint);
   $("#rows").addEventListener("click", (e) => {
     const tr = e.target.closest("tr[data-id]");
     if (tr) selectRow(tr.dataset.id, e);

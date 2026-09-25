@@ -87,6 +87,18 @@ class ProxyHandler(Base):
             self.send({"error": f"unknown action {action}"}, 404)
 
 
+def _imported_blob(entry: dict) -> str:
+    """The searchable text of an imported (HAR) flow, matching search_blob()."""
+    req = entry.get("request") or {}
+    resp = entry.get("response") or {}
+    parts = [entry.get("method", ""), entry.get("url", ""), str(entry.get("status", ""))]
+    for side in (req, resp):
+        for k, v in (side.get("headers") or []):
+            parts.append(f"{k}: {v}")
+        parts.append(((side.get("body") or {}).get("text") or "")[:32768])
+    return "\n".join(parts).lower()
+
+
 class FlowsHandler(Base):
     def _rows(self) -> list[dict]:
         rows = [summarize(f) for f in self.proxy.recorder.flows.values()]
@@ -106,19 +118,15 @@ class FlowsHandler(Base):
     def _respond(self, spec: dict) -> None:
         f = filters.Filter(spec)
         rows = [r for r in self._rows() if f.matches(r)]
-        if f.needs_bodies():          # body search costs a decode, so only on demand
+        if f.needs_bodies():          # full-text search decodes bodies, so only on demand
             keep = []
             for r in rows:
                 flow = self.proxy.recorder.get(r["id"])
-                if flow is None:
-                    imported = self.imported.get(r["id"]) or {}
-                    req = ((imported.get("request") or {}).get("body") or {}).get("text", "")
-                    resp = ((imported.get("response") or {}).get("body") or {}).get("text", "")
+                if flow is not None:
+                    blob = self.proxy.recorder.search_blob(flow)
                 else:
-                    d = detail(flow)
-                    req = (d["request"]["body"] or {}).get("text", "")
-                    resp = ((d.get("response") or {}).get("body") or {}).get("text", "")
-                if f.body_matches(req, resp):
+                    blob = _imported_blob(self.imported.get(r["id"]) or {})
+                if f.deep_matches(blob):
                     keep.append(r)
             rows = keep
         self.send({"flows": rows[-2000:], "total": len(rows),

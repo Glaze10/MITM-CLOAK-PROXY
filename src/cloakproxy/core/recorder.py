@@ -153,6 +153,7 @@ class Recorder:
         self.intercept_enabled = False
         self.intercept_filter = ""      # substring of the URL; empty means everything
         self.paused: dict[str, http.HTTPFlow] = {}
+        self._blobs: dict[str, tuple[bool, str]] = {}   # id -> (had_response, search text)
 
     # ── storage ──────────────────────────────────────────────────────────────
     def _keep(self, flow: http.HTTPFlow) -> None:
@@ -164,6 +165,38 @@ class Recorder:
 
     def get(self, flow_id: str) -> Optional[http.HTTPFlow]:
         return self.flows.get(flow_id)
+
+    def search_blob(self, flow: http.HTTPFlow) -> str:
+        """The whole flow as one lowercased string, for full-text search.
+
+        Method, URL, status, every header (so cookies are in here too) and both
+        bodies. Built once and cached off to the side — not on the flow, which
+        would write this whole thing into a saved project — and rebuilt only when
+        the response has since arrived, since searching all of it on every
+        keystroke would otherwise decode every body each time.
+        """
+        has_resp = flow.response is not None
+        cached = self._blobs.get(flow.id)
+        if cached is not None and cached[0] == has_resp:
+            return cached[1]
+        parts = [flow.request.method, flow.request.pretty_url]
+        for k, v in flow.request.headers.items(multi=True):
+            parts.append(f"{k}: {v}")
+        try:
+            parts.append((flow.request.get_text(strict=False) or "")[:32768])
+        except Exception:  # pylint: disable=broad-except
+            pass
+        if has_resp:
+            parts.append(str(flow.response.status_code))
+            for k, v in flow.response.headers.items(multi=True):
+                parts.append(f"{k}: {v}")
+            try:
+                parts.append((flow.response.get_text(strict=False) or "")[:32768])
+            except Exception:  # pylint: disable=broad-except
+                pass
+        blob = "\n".join(parts).lower()
+        self._blobs[flow.id] = (has_resp, blob)
+        return blob
 
     def mark(self, ids: list[str], colour: str) -> int:
         """Highlight flows. mitmproxy keeps `marked` on the flow, so a colour
@@ -194,6 +227,7 @@ class Recorder:
     def clear(self) -> None:
         self.flows.clear()
         self.paused.clear()
+        self._blobs.clear()
 
     def matches_intercept(self, flow: http.HTTPFlow) -> bool:
         if not self.intercept_enabled:

@@ -37,10 +37,17 @@ def test_status_range():
     assert ids(apply(ROWS, {"status_min": 200, "status_max": 204})) == ["1", "3", "4"]
 
 
-def test_text_matches_url_method_status_and_type():
-    assert ids(apply(ROWS, {"text": "checkout"})) == ["2"]
-    assert ids(apply(ROWS, {"text": "post"})) == ["2"]
-    assert ids(apply(ROWS, {"text": "image"})) == ["3"]
+def test_quick_text_is_a_full_text_search_over_the_whole_flow():
+    # The quick box now searches a per-flow blob (method, url, headers, cookies,
+    # both bodies), so matches() no longer decides text on its own — deep_matches
+    # does, against that blob. A substring that only appears in a body is findable.
+    f = Filter({"text": "f738d"})
+    assert f.needs_bodies()                              # text pulls in the bodies
+    assert f.deep_matches("post https://x/pay\nx-token: f738dabc\n{}")
+    assert not f.deep_matches("get https://x/menu\n{}")
+    # url/method still match, since they're part of the blob
+    assert Filter({"text": "checkout"}).deep_matches("post https://api/checkout")
+    assert not Filter({"text": "checkout"}).deep_matches("get https://api/menu")
 
 
 def test_hide_noise_drops_assets_by_mime_and_extension():
@@ -69,9 +76,8 @@ def test_describe_lists_what_is_narrowing():
     assert "POST" in chips and "4xx" in chips and "host~api" in chips
 
 
-def test_body_search_is_separate_because_it_costs_a_decode():
+def test_body_field_matches_inside_the_blob():
     f = Filter({"body": "token"})
     assert f.needs_bodies()
-    assert f.body_matches('{"token": 1}', "")
-    assert f.body_matches("", "TOKEN in the response")
-    assert not f.body_matches("nothing", "here either")
+    assert f.deep_matches('get https://x\n{"token": 1}')     # blob is lowercased
+    assert not f.deep_matches("get https://x\nnothing here")

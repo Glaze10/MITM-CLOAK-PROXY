@@ -1,6 +1,7 @@
 /* The detail area: request on the left, response on the right, both at once. */
 import { $, api, copy, draggable, esc, fmtSize, pretty, state, toast } from "./core.js";
 import { addRepeaterTab } from "./repeater.js";
+import { setNote } from "./flows.js";
 
 let raw = false;          // pretty vs raw, shared by both halves
 let lastId = null;        // whose content the panes are currently showing
@@ -8,6 +9,37 @@ let lastId = null;        // whose content the panes are currently showing
 const headerTable = (pairs) =>
   `<table class="kv">${(pairs || []).map(([k, v]) =>
     `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("")}</table>`;
+
+/* Cookies get their own block above the headers. A request's Cookie header is
+   often the longest line on the page and a wall of name=value pairs; pulling it
+   out and splitting it makes the actual headers readable, and makes a single
+   cookie easy to find. Set-Cookie on a response is treated the same way. */
+function cookieRows(headers) {
+  const out = [];
+  for (const [k, v] of headers || []) {
+    const key = k.toLowerCase();
+    if (key === "cookie") {
+      for (const part of String(v).split(";")) {
+        const i = part.indexOf("=");
+        if (i < 0) continue;
+        out.push([part.slice(0, i).trim(), part.slice(i + 1).trim()]);
+      }
+    } else if (key === "set-cookie") {
+      const pair = String(v).split(";")[0];      // the rest is attributes
+      const i = pair.indexOf("=");
+      if (i >= 0) out.push([pair.slice(0, i).trim(), pair.slice(i + 1).trim()]);
+    }
+  }
+  return out;
+}
+
+function cookieBlock(headers) {
+  const rows = cookieRows(headers);
+  if (!rows.length) return "";
+  return `<div class="cookies"><h4 class="sec">Cookies <span class="dim">${rows.length}</span></h4>` +
+    `<table class="kv">${rows.map(([k, v]) =>
+      `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("")}</table></div>`;
+}
 
 function bodyBlock(b, mime) {
   if (!b || !b.text) return `<p class="empty">No body.</p>`;
@@ -69,6 +101,99 @@ function keepingScroll(fn) {
 
 export function renderDetail() {
   keepingScroll(() => renderDetailNow());
+  paintNote();
+  reapplyFind();
+}
+
+/* ── the note pane ─────────────────────────────────────────────────────────
+   The note is shown in full, always, beside the response — reading it should
+   not mean opening an editor. It's also editable here directly, and saves as
+   you go. */
+function paintNote() {
+  const ta = $("#noteEdit");
+  if (!ta) return;
+  if (document.activeElement === ta) return;    // don't clobber while typing
+  ta.value = state.detail ? (state.detail.comment || "") : "";
+  ta.disabled = !state.detail;
+}
+
+/* ── find within a pane ────────────────────────────────────────────────────
+   A capture body can be thousands of lines; a search box under each pane finds
+   text in it, counts the hits, and steps through them. It re-runs after the
+   pane re-renders, so a query stays live as responses arrive. */
+const finds = { reqBody: { q: "", idx: 0 }, resBody: { q: "", idx: 0 } };
+
+function clearMarks(pane) {
+  pane.querySelectorAll("mark.find").forEach((m) => m.replaceWith(
+    document.createTextNode(m.textContent)));
+  pane.normalize();
+}
+
+function runFind(paneId) {
+  const pane = $("#" + paneId);
+  const st = finds[paneId];
+  clearMarks(pane);
+  const count = $(`.findbar[data-find="${paneId}"] .findcount`);
+  const q = st.q.toLowerCase();
+  if (!q) { count.textContent = ""; return; }
+  const walker = document.createTreeWalker(pane, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n);
+  let total = 0;
+  for (const node of nodes) {
+    const text = node.nodeValue, lower = text.toLowerCase();
+    let i = lower.indexOf(q);
+    if (i < 0) continue;
+    const frag = document.createDocumentFragment();
+    let last = 0;
+    while (i >= 0) {
+      if (i > last) frag.appendChild(document.createTextNode(text.slice(last, i)));
+      const mk = document.createElement("mark");
+      mk.className = "find";
+      mk.textContent = text.slice(i, i + q.length);
+      frag.appendChild(mk);
+      total++;
+      last = i + q.length;
+      i = lower.indexOf(q, last);
+    }
+    if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+    node.replaceWith(frag);
+  }
+  if (st.idx >= total) st.idx = 0;
+  highlightCurrent(paneId, total);
+}
+
+function highlightCurrent(paneId, total) {
+  const pane = $("#" + paneId);
+  const marks = [...pane.querySelectorAll("mark.find")];
+  marks.forEach((m, i) => m.classList.toggle("current", i === finds[paneId].idx));
+  $(`.findbar[data-find="${paneId}"] .findcount`).textContent = total ? `${finds[paneId].idx + 1}/${total}` : "0";
+  marks[finds[paneId].idx]?.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
+function step(paneId, dir) {
+  const marks = $("#" + paneId).querySelectorAll("mark.find");
+  if (!marks.length) return;
+  finds[paneId].idx = (finds[paneId].idx + dir + marks.length) % marks.length;
+  highlightCurrent(paneId, marks.length);
+}
+
+function reapplyFind() {
+  for (const id of ["reqBody", "resBody"]) if (finds[id].q) runFind(id);
+}
+
+function initFind() {
+  document.querySelectorAll(".findbar").forEach((bar) => {
+    const paneId = bar.dataset.find;
+    const input = bar.querySelector("input");
+    input.addEventListener("input", () => { finds[paneId].q = input.value; finds[paneId].idx = 0; runFind(paneId); });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); step(paneId, e.shiftKey ? -1 : 1); }
+      if (e.key === "Escape") { input.value = ""; finds[paneId].q = ""; runFind(paneId); }
+    });
+    bar.querySelector("[data-find-next]").onclick = () => step(paneId, 1);
+    bar.querySelector("[data-find-prev]").onclick = () => step(paneId, -1);
+  });
 }
 
 function renderDetailNow() {
@@ -87,6 +212,7 @@ function renderDetailNow() {
   $("#reqBody").innerHTML = `
     <div class="statusline">${esc(d.request.method)} <span class="url">${esc(d.request.url)}</span></div>
     ${cloakLine(d)}
+    ${cookieBlock(d.request.headers)}
     <h4 class="sec">Headers</h4>${headerTable(d.request.headers)}
     ${bodyBlock(d.request.body, reqMime)}`;
 
@@ -101,6 +227,7 @@ function renderDetailNow() {
   $("#resBody").innerHTML = `
     <div class="statusline status-${String(d.response.status)[0]}">${d.response.status} ${
       esc(d.response.reason || "")}</div>
+    ${cookieBlock(d.response.headers)}
     <h4 class="sec">Headers</h4>${headerTable(d.response.headers)}
     ${bodyBlock(d.response.body, resMime)}`;
 }
@@ -113,6 +240,17 @@ export async function showDetail(id) {
 export function initDetail() {
   draggable($("#gutterH"), $("#flowPane"), "y");
   draggable($("#gutterV"), $("#reqHalf"), "x");
+  draggable($("#gutterN"), $("#noteHalf"), "x");
+  initFind();
+
+  // edit the note in place; save shortly after you stop typing
+  let noteTimer = null;
+  $("#noteEdit").addEventListener("input", () => {
+    if (!state.detail) return;
+    clearTimeout(noteTimer);
+    const id = state.detail.id, text = $("#noteEdit").value;
+    noteTimer = setTimeout(() => setNote([id], text), 500);
+  });
 
   document.querySelectorAll("[data-view-mode]").forEach((b) => {
     b.onclick = () => {

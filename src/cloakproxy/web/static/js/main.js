@@ -7,6 +7,7 @@ import { initIntercept, renderQueue, setIntercept } from "./intercept.js";
 import { initRepeater } from "./repeater.js";
 import { initRules, loadRules } from "./rules.js";
 import { initSettings, loadProjects, loadTls, paintSettings, refreshCloakStats } from "./settings.js";
+import { initAutosave, markDirty } from "./save.js";
 
 /* ── tabs ────────────────────────────────────────────────────────────── */
 function initTabs() {
@@ -108,6 +109,7 @@ function initHistoryBar() {
     if (!path) return;
     const r = await api("/api/har", { method: "POST", body: { path } });
     r.error ? toast(r.error, true) : toast(`Imported ${r.imported} entries`);
+    markDirty();
     loadFlows();
   };
 }
@@ -157,6 +159,7 @@ function connect() {
   initRepeater();
   initSettings();
   initReload();
+  initAutosave();
 
   paintState(await api("/api/state"));
   await Promise.all([loadFlows(), loadRules(), refreshCloakStats(), loadTls()]);
