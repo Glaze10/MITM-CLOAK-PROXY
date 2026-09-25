@@ -91,3 +91,28 @@ def test_switching_identity_does_not_rebuild_the_proxy():
             await pm.stop()
 
     asyncio.run(go())
+
+
+def test_port_list_is_cleaned_before_it_reaches_mitmproxy():
+    """Duplicates make mitmproxy refuse every listener, not just the repeat."""
+    clean = ProxyManager._clean_ports
+    fallback = [{"port": 8080, "on": True}]
+
+    assert clean([{"port": "8081", "on": False}], fallback) == [{"port": 8081, "on": False}]
+    assert clean([8080, 8080, 8081], fallback) == [
+        {"port": 8080, "on": True}, {"port": 8081, "on": True}]
+    assert clean([{"port": 0}, {"port": 70000}, {"port": "nope"}], fallback) == fallback
+    assert clean([], fallback) == fallback
+    assert clean(None, fallback) == fallback
+
+
+def test_the_quoted_port_is_one_that_is_actually_listening():
+    pm = ProxyManager(lambda *a: None)
+    pm.ports = [{"port": 8080, "on": False}, {"port": 8081, "on": True}]
+    assert pm.listening == [8081]
+    assert pm.port == 8081                      # not the switched-off one
+    assert pm._modes() == ["regular@0.0.0.0:8081"]
+
+    pm.ports = [{"port": 8080, "on": False}]
+    assert pm.listening == [] and pm._modes() == []
+    assert pm.port == 8080                      # something still has to be quoted

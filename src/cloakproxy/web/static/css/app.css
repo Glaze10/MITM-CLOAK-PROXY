@@ -115,7 +115,7 @@ table.flows tbody tr.paused { background: #241f12; }
 table.flows tbody tr.imported { opacity: .7; font-style: italic; }
 .c-mark { width: 16px; } .c-method { width: 66px; } .c-host { width: 190px; }
 .c-status { width: 54px; } .c-type { width: 120px; } .c-size { width: 66px; }
-.c-time { width: 62px; } .c-tls { width: 58px; }
+.c-time { width: 62px; } .c-tls { width: 148px; }
 td.status-2 { color: var(--ok); } td.status-3 { color: var(--accent); }
 td.status-4 { color: var(--warn); } td.status-5, td.status-0 { color: var(--bad); }
 td.tls-mirror { color: var(--ok); } td.tls-static { color: var(--warn); }
@@ -430,3 +430,21 @@ input[type="checkbox"]:disabled, input[type="radio"]:disabled { opacity: .4; cur
 .submenu:hover > .flyout, .flyout:hover { display: block; }
 /* a menu that opens rightwards runs off a narrow window; flip it when it would */
 .ctx.flip-sub .flyout { left: auto; right: calc(100% - 2px); }
+
+/* ── the listeners ───────────────────────────────────────────────────── */
+.ports { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.portRow { display: flex; align-items: center; gap: 9px; padding: 5px 8px;
+  border: 1px solid var(--line); border-radius: 7px; background: var(--bg);
+  transition: border-color var(--fast), background-color var(--fast), opacity var(--calm); }
+.portRow.on { border-color: var(--accent-dim); background: var(--bg3); }
+.portRow:not(.on) { opacity: .55; }
+.portRow:hover { border-color: var(--line2); }
+.portRow input[type="number"] { flex: 1 1 auto; min-width: 0; font-family: var(--mono);
+  background: transparent; border-color: transparent; }
+.portRow input[type="number"]:focus { background: var(--bg2); border-color: var(--accent); }
+.portRow .x { flex: 0 0 auto; background: none; border: 0; color: var(--dim2);
+  font-size: 15px; line-height: 1; padding: 0 4px; }
+.portRow .x:hover:not(:disabled) { color: var(--bad); }
+.portRow .x:disabled { opacity: .25; cursor: default; }
+button.addPort { color: var(--dim); border-style: dashed; }
+button.addPort:hover { color: var(--accent); border-color: var(--accent-dim); border-style: solid; }

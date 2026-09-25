@@ -71,6 +71,7 @@ class ProxyHandler(Base):
         body = self.body_json()
         if action == "start":
             self.send(await self.proxy.start(port=int(body.get("port") or 0),
+                                             ports=body.get("ports"),
                                              mode=body.get("mode", ""),
                                              preset=body.get("preset", ""),
                                              allow_hosts=body.get("allow_hosts")))
@@ -78,7 +79,8 @@ class ProxyHandler(Base):
             # identity changes apply live; only the port needs a restart
             self.send(await self.proxy.configure(mode=body.get("mode"),
                                                  preset=body.get("preset"),
-                                                 allow_hosts=body.get("allow_hosts")))
+                                                 allow_hosts=body.get("allow_hosts"),
+                                                 ports=body.get("ports")))
         elif action == "stop":
             self.send(await self.proxy.stop())
         else:

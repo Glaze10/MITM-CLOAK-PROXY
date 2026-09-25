@@ -33,11 +33,11 @@ function rawResponse(d) {
 function cloakLine(d) {
   const c = d.cloak || {};
   if (!c.via) return "";
-  const what = c.via === "mirror"
-    ? `mirrored the client's own handshake`
-    : `presented the <b>${esc(c.preset || "preset")}</b> fingerprint`;
-  return `<p class="hint">TLS: ${what}${c.upstream ? ` · ${esc(c.upstream)}` : ""}${
-    c.ms != null ? ` · ${c.ms} ms` : ""}</p>`;
+  const how = c.via === "mirror"
+    ? "mirrored from this client's own handshake"
+    : "a preset, in place of the client's";
+  return `<p class="hint">TLS: <b>${esc(c.preset || "—")}</b> (${esc(c.via)}) — ${how}${
+    c.upstream ? ` · ${esc(c.upstream)}` : ""}${c.ms != null ? ` · ${c.ms} ms` : ""}</p>`;
 }
 
 /** Keep the reader's place when a flow updates under them.

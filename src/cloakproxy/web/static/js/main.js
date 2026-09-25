@@ -44,8 +44,10 @@ export function paintState(s) {
   state.proxy = s;
   paintAddress(s);
   $("#dot").classList.toggle("on", !!s.running);
+  const live = (s.listening || []).map((p) => ":" + p);
   $("#statusText").textContent = s.running
-    ? `listening on :${s.port}` : s.error ? "stopped — see settings" : "stopped";
+    ? (live.length ? `listening on ${live.join(", ")}` : "no ports switched on")
+    : s.error ? "stopped — see settings" : "stopped";
   $("#btnToggle").textContent = s.running ? "Stop" : "Start";
   $("#btnToggle").classList.toggle("primary", !s.running);
   const ib = $("#btnIntercept");
@@ -65,8 +67,7 @@ function initTitlebar() {
     const running = state.proxy.running;
     paintState(await api(running ? "/api/proxy/stop" : "/api/proxy/start", {
       method: "POST",
-      body: { port: +$("#setPort").value || 8080,
-              mode: $('#modeChoices input:checked')?.value || "auto",
+      body: { mode: $('#modeChoices input:checked')?.value || "auto",
               preset: $("#setPreset").value },
     }));
   };

@@ -119,13 +119,47 @@ class ProxyManager:
         self.rules = MatchReplace()
         self.master: Optional[DumpMaster] = None
         self._task: Optional[asyncio.Task] = None
-        self.port = DEFAULT_PORT
+        # Several listeners, each switchable. A phone, an emulator and a desktop
+        # browser want different ports, and mitmproxy takes a list of modes and
+        # rebinds when it changes — so a port can be added or switched off
+        # without disturbing the connections on the others.
+        self.ports: list[dict[str, Any]] = [{"port": DEFAULT_PORT, "on": True}]
         self.mode = DEFAULT_MODE
         self.preset = DEFAULT_PRESET
         self.allow_hosts = ""
         self.error: str = ""
         self.notices = Notices()
         logging.getLogger().addHandler(self.notices)
+
+    @property
+    def port(self) -> int:
+        """The port to quote when one has to stand for the proxy."""
+        live = [p["port"] for p in self.ports if p.get("on")]
+        return live[0] if live else (self.ports[0]["port"] if self.ports else DEFAULT_PORT)
+
+    @property
+    def listening(self) -> list[int]:
+        return [p["port"] for p in self.ports if p.get("on")]
+
+    def _modes(self) -> list[str]:
+        return [f"regular@0.0.0.0:{p}" for p in self.listening]
+
+    @staticmethod
+    def _clean_ports(raw: Any, fallback: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Accept what the interface sends, and refuse what can't be bound."""
+        out: list[dict[str, Any]] = []
+        seen: set[int] = set()
+        for item in raw or []:
+            try:
+                port = int(item["port"] if isinstance(item, dict) else item)
+            except (TypeError, ValueError, KeyError):
+                continue
+            if not 1 <= port <= 65535 or port in seen:
+                continue          # duplicates would make mitmproxy refuse the lot
+            seen.add(port)
+            on = bool(item.get("on", True)) if isinstance(item, dict) else True
+            out.append({"port": port, "on": on})
+        return out or fallback
 
     @property
     def running(self) -> bool:
@@ -135,6 +169,8 @@ class ProxyManager:
         return {
             "running": self.running,
             "port": self.port,
+            "ports": [dict(p) for p in self.ports],
+            "listening": self.listening,
             "mode": self.mode,
             "preset": self.preset,
             "allow_hosts": self.allow_hosts,
@@ -147,32 +183,33 @@ class ProxyManager:
             "error": self.error,
         }
 
-    async def start(self, *, port: int = 0, mode: str = "", preset: str = "",
-                    allow_hosts: Optional[str] = None) -> dict[str, Any]:
-        """Start, or restart if the settings differ from what's already running.
+    async def start(self, *, port: int = 0, ports: Any = None, mode: str = "",
+                    preset: str = "", allow_hosts: Optional[str] = None) -> dict[str, Any]:
+        """Start, or apply the settings to a proxy that is already running.
+
+        Nothing here needs a rebuild any more: the listeners come from the mode
+        list, which mitmproxy re-binds in place, and the cloak reads its identity
+        per request. Starting a running proxy is therefore the same as
+        configuring it.
 
         allow_hosts takes None for "leave it alone" — an empty string is a real
         value meaning "no restriction", and the title bar's Start button, which
         sends no host list at all, must not quietly clear one.
         """
-        wanted = (int(port or self.port), mode or self.mode, preset or self.preset,
-                  allow_hosts if allow_hosts is not None else self.allow_hosts)
+        if ports is not None:
+            self.ports = self._clean_ports(ports, self.ports)
+        elif port:
+            self.ports = [{"port": int(port), "on": True}]
         if self.running:
-            if wanted == (self.port, self.mode, self.preset, self.allow_hosts):
-                return self.state()
-            # asking for different settings means asking for a restart, not a no-op
-            await self.stop()
-            # Windows hangs on to a just-closed listener for a moment. Restarting on
-            # the same port lands on it and fails, so wait for the port to come free
-            # rather than telling the user it's in use by something else.
-            await _wait_for_port(wanted[0])
-        self.port = int(port or self.port)
+            return await self.configure(mode=mode or None, preset=preset or None,
+                                        allow_hosts=allow_hosts, ports=None)
         self.mode = mode or self.mode
         self.preset = preset or self.preset
         self.allow_hosts = allow_hosts if allow_hosts is not None else self.allow_hosts
         self.error = ""
 
-        opts = options.Options(listen_host="0.0.0.0", listen_port=self.port)
+        # one mode per enabled port; mitmproxy binds each and rebinds on change
+        opts = options.Options(mode=self._modes())
         # no termlog/dumper: this process talks to a browser, not a terminal
         self.master = DumpMaster(opts, with_termlog=False, with_dumper=False)
         # mitmproxy's errorcheck addon calls sys.exit() when startup fails, which is
@@ -222,19 +259,16 @@ class ProxyManager:
         # so the thing to look at is whether it is actually running and holding an
         # address — a busy port leaves is_running False and listen_addrs empty.
         if self.master is not None:
-            ps = self.master.addons.get("proxyserver")
-            servers = list(getattr(ps, "servers", []) or [])
-            if not servers or not all(getattr(s, "is_running", False)
-                                      and getattr(s, "listen_addrs", ()) for s in servers):
-                self.error = (self.error
-                              or f"couldn't listen on port {self.port} — already in use?")
+            self._check_listeners()
+            if self.error:
                 await self.stop()
                 return self.state()
         self.emit("proxy", self.state())
         return self.state()
 
     async def configure(self, *, mode: Optional[str] = None, preset: Optional[str] = None,
-                        allow_hosts: Optional[str] = None) -> dict[str, Any]:
+                        allow_hosts: Optional[str] = None,
+                        ports: Any = None) -> dict[str, Any]:
         """Change the identity without restarting anything.
 
         The cloak reads its mode and preset from the options on every request, and
@@ -249,20 +283,42 @@ class ProxyManager:
             self.preset = preset
         if allow_hosts is not None:
             self.allow_hosts = allow_hosts
+        if ports is not None:
+            self.ports = self._clean_ports(ports, self.ports)
 
         if self.master is not None:
+            self.error = ""
             update: dict[str, Any] = {"mitmcloak_mode": self.mode,
                                       "mitmcloak_preset": self.preset}
             if allow_hosts is not None:
                 update["allow_hosts"] = [h.strip() for h in self.allow_hosts.split(",")
                                          if h.strip()]
+            if ports is not None:
+                update["mode"] = self._modes()      # adds, drops and moves listeners
             try:
                 self.master.options.update(**update)
             except Exception as exc:  # pylint: disable=broad-except
                 self.error = f"{type(exc).__name__}: {exc}"
                 LOG.warning("couldn't apply %s live: %s", update, exc)
+            if ports is not None and not self.error:
+                # the rebind is a task; give it a moment, then report the truth
+                await asyncio.sleep(0.35)
+                self._check_listeners()
         self.emit("proxy", self.state())
         return self.state()
+
+    def _check_listeners(self) -> None:
+        """Say which ports didn't come up, rather than claiming they all did."""
+        ps = self.master.addons.get("proxyserver") if self.master else None
+        servers = list(getattr(ps, "servers", []) or [])
+        live = {addr[1] for srv in servers if getattr(srv, "is_running", False)
+                for addr in (getattr(srv, "listen_addrs", ()) or ())}
+        missing = [p for p in self.listening if p not in live]
+        if missing:
+            ports = ", ".join(str(p) for p in missing)
+            self.error = (f"couldn't listen on port {ports} — already in use?"
+                          if len(missing) == 1
+                          else f"couldn't listen on ports {ports} — already in use?")
 
     async def stop(self) -> dict[str, Any]:
         """Ask the proxy to finish, and wait for the port to actually be free.

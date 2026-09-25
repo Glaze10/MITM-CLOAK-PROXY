@@ -143,7 +143,10 @@
       <div class="settings">
         <section class="card">
           <h3>Listener</h3>
-          <label class="field"><span>Proxy port</span><input id="setPort" type="number" min="1" max="65535"></label>
+          <div class="ports" id="portList"></div>
+          <button id="btnAddPort" class="mini addPort">+ Add a port</button>
+          <p class="hint" id="portsHint">Each switched-on port listens at once, so a
+            phone, an emulator and a browser can each have their own.</p>
           <label class="field"><span>Only these hosts</span>
             <input id="setAllow" placeholder="comma separated, blank for all">
           </label>

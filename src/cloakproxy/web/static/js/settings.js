@@ -13,8 +13,13 @@ export function paintIdentity(s = state.proxy) {
   const mirroring = mode !== "static";
   const value = $("#idValue");
 
-  // the title bar always says what will go out, in words, not settings
-  const said = mirroring ? "mirroring the client" : `custom · ${s.preset || "—"}`;
+  // The title bar names the identity itself. While mirroring, that's whatever
+  // the last connection actually carried — there's no single answer until a
+  // client has been through, so until then it says what it will do.
+  const seen = state.lastTls;
+  const said = !mirroring ? `${s.preset || "—"} (preset)`
+    : seen && seen.via === "mirror" ? `${seen.preset} (mirror)`
+    : "mirroring the client";
   if (value.textContent && value.textContent !== said) {
     const pill = $("#identity");            // acknowledge the change, briefly
     pill.classList.remove("changed");
@@ -62,7 +67,7 @@ export async function refreshCloakStats() {
 
 /* ── proxy settings ──────────────────────────────────────────────────── */
 export function paintSettings(s = state.proxy) {
-  $("#setPort").value = s.port ?? 8080;
+  paintPorts(s);
   $("#setAllow").value = s.allow_hosts || "";
   // A pinned fingerprint is often one mirrored from a device, which isn't in the
   // built-in list — it still has to appear here, or the control would name a
@@ -97,26 +102,76 @@ async function applyIdentity(patch = {}) {
   paintSettings(state.proxy);
 }
 
-/** The listener: a new port genuinely needs the proxy rebuilt. */
+/* ── the listeners ───────────────────────────────────────────────────────
+   Several ports at once, each switchable. mitmproxy binds one listener per
+   mode and rebinds when the list changes, so adding a port or switching one
+   off never disturbs the connections on the others. */
+function portRows() {
+  return $$("#portList .portRow").map((row) => ({
+    port: +row.querySelector("input[type=number]").value || 0,
+    on: row.querySelector("input[type=checkbox]").checked,
+  })).filter((p) => p.port > 0);
+}
+
+function paintPorts(s = state.proxy) {
+  const list = $("#portList");
+  const ports = s.ports && s.ports.length ? s.ports : [{ port: s.port || 8080, on: true }];
+  // don't redraw while someone is typing into one of these
+  if (document.activeElement && list.contains(document.activeElement)) return;
+  const sig = JSON.stringify(ports);
+  if (list.dataset.sig === sig) return;
+  list.dataset.sig = sig;
+  list.innerHTML = ports.map((p, i) => `
+    <div class="portRow${p.on ? " on" : ""}">
+      <label class="switch" title="${p.on ? "Listening" : "Switched off"}">
+        <input type="checkbox"${p.on ? " checked" : ""}></label>
+      <input type="number" min="1" max="65535" value="${p.port}">
+      <button class="x" data-drop-port="${i}" title="Remove"
+        ${ports.length > 1 ? "" : "disabled"}>×</button>
+    </div>`).join("");
+}
+
+/** Apply the listeners and the host list. Live: nothing is torn down. */
 async function applyListener(patch = {}) {
   const running = state.proxy.running;
   const body = {
-    port: +$("#setPort").value,
+    ports: portRows(),
     mode: $('#modeChoices input:checked')?.value || "auto",
     preset: $("#setPreset").value,
     allow_hosts: $("#setAllow").value,
     ...patch,
   };
-  if (running && body.port === state.proxy.port) {      // only the host list moved
-    state.proxy = await api("/api/proxy/config", { method: "POST", body });
-    paintSettings(state.proxy);
-    return toast("Applied");
-  }
-  $("#statusText").textContent = running ? "restarting…" : "starting…";
-  const s = await api("/api/proxy/start", { method: "POST", body });
+  if (!body.ports.length) return toast("Keep at least one port", true);
+  const where = running ? "/api/proxy/config" : "/api/proxy/start";
+  const s = await api(where, { method: "POST", body });
   state.proxy = s;
+  $("#portList").dataset.sig = "";          // the server may have cleaned it up
   paintSettings(s);
-  if (!s.error) toast(running ? `Now listening on :${s.port}` : `Listening on :${s.port}`);
+  if (s.error) return;                      // the toast comes from the error itself
+  const live = (s.listening || []).map((p) => ":" + p).join(", ");
+  toast(live ? `Listening on ${live}` : "No ports switched on");
+}
+
+function initPorts() {
+  $("#btnAddPort").onclick = () => {
+    const rows = portRows();
+    const next = Math.max(8080, ...rows.map((r) => r.port)) + 1;
+    rows.push({ port: next, on: true });
+    $("#portList").dataset.sig = "";
+    paintPorts({ ...state.proxy, ports: rows });
+    applyListener({ ports: rows });
+  };
+  $("#portList").addEventListener("change", () => applyListener());
+  $("#portList").addEventListener("click", (e) => {
+    const drop = e.target.closest("[data-drop-port]");
+    if (!drop) return;
+    const rows = portRows();
+    if (rows.length < 2) return;
+    rows.splice(+drop.dataset.dropPort, 1);
+    $("#portList").dataset.sig = "";
+    paintPorts({ ...state.proxy, ports: rows });
+    applyListener({ ports: rows });
+  });
 }
 
 /* ── projects ────────────────────────────────────────────────────────── */
@@ -213,6 +268,8 @@ function initCustomTls() {
 
 export function initSettings() {
   initCustomTls();
+  // the newest flow tells us which fingerprint mirroring actually produced
+  document.addEventListener("cloak:identity", () => paintIdentity());
   $("#cloakNotices").addEventListener("click", (e) => {
     const drop = e.target.closest("[data-drop]");
     if (!drop) return;
@@ -223,8 +280,8 @@ export function initSettings() {
     r.onchange = () => applyIdentity();
   });
   $("#setPreset").onchange = () => applyIdentity();
-  $("#setPort").onchange = () => applyListener();
   $("#setAllow").onchange = () => applyListener();
+  initPorts();
 
   $("#btnCert").onclick = async () => {
     const c = await api("/api/cert");

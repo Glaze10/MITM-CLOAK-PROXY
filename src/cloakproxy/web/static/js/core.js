@@ -50,6 +50,7 @@ export const state = {
   quick: "",
   prefs: { pretty: true, follow: true, maxRows: 2000 },
   proxy: {},                 // last known proxy state
+  lastTls: null,             // the identity the most recent connection used
   repeater: [],              // open repeater tabs
 };
 

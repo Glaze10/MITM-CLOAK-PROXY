@@ -46,7 +46,28 @@ function fillRow(tr, f) {
   set(5, f.mime || "");
   set(6, fmtSize(f.size));
   set(7, f.ms != null ? f.ms + " ms" : "");
-  set(8, via === "mirror" ? "mirror" : via === "static" ? "preset" : "", "tls-" + via);
+  // The column names the identity that actually went out — "mirror" says how it
+  // was chosen, not what the origin saw, and what the origin saw is the point.
+  const cloak = f.cloak || {};
+  set(8, cloak.preset || "", "tls-" + via);
+  const title = cloak.preset
+    ? `${cloak.preset} — ${via === "mirror" ? "mirrored from this client's own handshake"
+                                            : "a preset, in place of the client's"}` +
+      (cloak.upstream ? ` · ${cloak.upstream}` : "")
+    : "";
+  if (td[8].title !== title) td[8].title = title;
+  noteIdentity(cloak);
+}
+
+/** Remember what the newest connection used, for the title bar. */
+function noteIdentity(cloak) {
+  if (!cloak.preset || !cloak.via) return;
+  const last = state.lastTls;
+  if (last && last.preset === cloak.preset && last.via === cloak.via) return;
+  state.lastTls = { preset: cloak.preset, via: cloak.via };
+  // settings.js owns the title bar; an event keeps the two from importing
+  // each other in a circle
+  document.dispatchEvent(new CustomEvent("cloak:identity"));
 }
 
 function rowFor(id) {
