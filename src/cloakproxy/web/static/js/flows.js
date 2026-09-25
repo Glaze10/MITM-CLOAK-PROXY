@@ -47,19 +47,34 @@ function fillRow(tr, f) {
   set(6, fmtSize(f.size));
   set(7, f.ms != null ? f.ms + " ms" : "");
   // The column names which client this is, not the digest of its handshake.
-  // A stack the cloak doesn't recognise has no name to give — saying so is
-  // better than showing a hash or, worse, the preset it fell back to.
+  // How firmly it's known varies, and the styling says so: a preset match is
+  // certain, a self-reported library is probably right, a family is an
+  // inference from the bytes.
   const cloak = f.cloak || {};
-  const label = cloak.label || (cloak.preset ? "unrecognised" : "");
-  set(8, label, "tls-" + via + (cloak.label ? "" : " tls-unknown"));
-  const title = cloak.preset
-    ? (cloak.label ? `${cloak.label} — ` : "This client's stack wasn't recognised. ") +
-      (via === "mirror" ? "mirrored from its own handshake" : "a preset, in place of the client's") +
-      `
-${cloak.preset}${cloak.upstream ? ` · ${cloak.upstream}` : ""}`
-    : "";
-  if (td[8].title !== title) td[8].title = title;
+  set(8, cloak.label || "", "tls-" + via + (cloak.label_source
+    ? " src-" + cloak.label_source : ""));
+  if (td[8].title !== tlsTitle(cloak)) td[8].title = tlsTitle(cloak);
   noteIdentity(cloak);
+}
+
+const HOW = {
+  tls: "recognised by its TLS handshake",
+  preset: "the preset every connection is presenting",
+  ua: "named by its own User-Agent; its TLS stack isn't one Cloak recognises",
+  family: "inferred from its TLS handshake — the stack family, not the product",
+  shape: "all its handshake gives away; the stack isn't one Cloak can name",
+};
+
+function tlsTitle(cloak) {
+  if (!cloak.preset) return "";
+  const how = HOW[cloak.label_source] || "";
+  const went = cloak.via === "mirror"
+    ? "Mirrored: this client's own handshake went upstream."
+    : "A preset went upstream in place of the client's own handshake.";
+  return `${cloak.label || "unnamed"}${how ? ` — ${how}` : ""}
+${went}` +
+         `
+${cloak.preset}${cloak.upstream ? ` · ${cloak.upstream}` : ""}`;
 }
 
 /** Remember what the newest connection used, for the title bar. */
@@ -67,7 +82,8 @@ function noteIdentity(cloak) {
   if (!cloak.preset || !cloak.via) return;
   const last = state.lastTls;
   if (last && last.preset === cloak.preset && last.via === cloak.via) return;
-  state.lastTls = { preset: cloak.preset, via: cloak.via, label: cloak.label || "" };
+  state.lastTls = { preset: cloak.preset, via: cloak.via, label: cloak.label || "",
+                    source: cloak.label_source || "" };
   // settings.js owns the title bar; an event keeps the two from importing
   // each other in a circle
   document.dispatchEvent(new CustomEvent("cloak:identity"));
@@ -360,7 +376,7 @@ function initColumns() {
     grab.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
       e.preventDefault();
-      grab.setPointerCapture(e.pointerId);  // keep tracking outside the header
+      try { grab.setPointerCapture(e.pointerId); } catch { /* capture is a bonus */ }
       const startX = e.clientX;
       const startTotal = freeze(table, heads);
       const startW = th.offsetWidth;
@@ -384,16 +400,22 @@ function initColumns() {
         if (pending) { cancelAnimationFrame(pending); apply(); }
         grab.classList.remove("dragging");
         document.body.classList.remove("resizing");
-        grab.removeEventListener("pointermove", move);
-        grab.removeEventListener("pointerup", done);
-        grab.removeEventListener("pointercancel", done);
+        window.removeEventListener("pointermove", move, true);
+        window.removeEventListener("pointerup", done, true);
+        window.removeEventListener("pointercancel", done, true);
+        window.removeEventListener("blur", done);
         const map = {};
         heads.forEach((h, j) => { map[colKey(h, j)] = h.offsetWidth; });
         storeWidths(map);
       };
-      grab.addEventListener("pointermove", move);
-      grab.addEventListener("pointerup", done);
-      grab.addEventListener("pointercancel", done);
+      // Listen on the window, not the handle. Pointer capture should keep the
+      // events coming, but a fast drag that outruns the renderer can still slip
+      // the element, and then the column stops following the cursor — which is
+      // exactly what "the cursor overcomes it" feels like.
+      window.addEventListener("pointermove", move, true);
+      window.addEventListener("pointerup", done, true);
+      window.addEventListener("pointercancel", done, true);
+      window.addEventListener("blur", done);
     });
 
     grab.addEventListener("dblclick", (e) => {

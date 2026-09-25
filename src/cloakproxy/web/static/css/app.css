@@ -458,15 +458,19 @@ input[type="checkbox"]:disabled, input[type="radio"]:disabled { opacity: .4; cur
 button.addPort { color: var(--dim); border-style: dashed; }
 button.addPort:hover { color: var(--accent); border-color: var(--accent-dim); border-style: solid; }
 
-td.tls-unknown { color: var(--dim2); font-style: italic; }
+/* how firmly the name is known, read at a glance */
+td.src-tls, td.src-preset { }                       /* certain: the column's own colour */
+td.src-ua { color: var(--accent-warm); }            /* self-reported */
+td.src-family { color: var(--dim); font-style: italic; }   /* inferred */
+td.src-shape { color: var(--dim2); font-style: italic; }   /* barely anything */
 
 /* ── draggable columns ───────────────────────────────────────────────────
    A path is as long as it is; rather than choose a width for everyone, let
    the reader take space from a neighbouring column and give it back. */
 table.flows thead th { position: sticky; }
 /* inside the cell, since the header clips its overflow to keep the ellipsis */
-.colgrab { position: absolute; top: 0; right: 0; width: 8px; height: 100%;
-  cursor: col-resize; z-index: 2; }
+.colgrab { position: absolute; top: 0; right: 0; width: 14px; height: 100%;
+  cursor: col-resize; z-index: 3; touch-action: none; }
 .colgrab::after { content: ""; position: absolute; right: 2px; top: 5px; bottom: 5px;
   width: 1px; background: var(--line2); transition: background-color var(--fast); }
 .colgrab:hover::after, .colgrab.dragging::after { background: var(--accent); width: 2px; }

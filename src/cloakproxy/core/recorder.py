@@ -77,7 +77,29 @@ def summarize(flow: http.HTTPFlow, *, state: str = "") -> dict[str, Any]:
 # fingerprint was recognised as, so a flow reads "chrome-151-windows" rather
 # than "mc-6b4ed3697900". Empty when the client wasn't recognised — the mirror
 # still carries its real handshake, there's just no name for it.
-name_preset: Callable[[str, Any], str] = lambda name, flow=None: name
+name_preset: Callable[[str, Any], Any] = lambda name, flow=None: (name, "preset")
+
+
+def _labelled(preset: str, flow: http.HTTPFlow) -> tuple[str, str]:
+    """Name this flow's client, and keep the answer with the flow.
+
+    Naming an unrecognised stack reads the captured handshake, which the cloak
+    holds only while that connection is open. The first look happens as the
+    response arrives, when it's still there; a later look — rendering the table,
+    reopening a project — would find nothing and quietly come back empty.
+    """
+    meta = flow.metadata if flow.metadata is not None else {}
+    kept = meta.get("cloak_label")
+    if kept:
+        return str(kept[0]), str(kept[1])
+    try:
+        text, source = name_preset(preset, flow)
+    except Exception:  # pylint: disable=broad-except
+        return preset, ""
+    text, source = str(text or ""), str(source or "")
+    if text:
+        meta["cloak_label"] = (text, source)
+    return text, source
 
 
 def cloak_info(flow: http.HTTPFlow) -> dict[str, Any]:
@@ -86,10 +108,12 @@ def cloak_info(flow: http.HTTPFlow) -> dict[str, Any]:
     if not meta:
         return {}
     preset = meta.get("preset") or ""
+    label, source = _labelled(preset, flow)
     return {
         "via": meta.get("via", ""),          # "mirror" = the client's own handshake
         "preset": preset,                    # the exact identity, minted or built in
-        "label": name_preset(preset, flow),  # what that identity is, in readable form
+        "label": label,                      # what that identity is, readably
+        "label_source": source,              # and how well we actually know it
         "upstream": meta.get("upstream") or "",
         "ms": meta.get("ms"),
     }

@@ -19,7 +19,6 @@ export function paintIdentity(s = state.proxy) {
   const seen = state.lastTls;
   const said = !mirroring ? `${s.preset || "—"} (preset)`
     : seen && seen.via === "mirror" && seen.label ? `${seen.label} (mirror)`
-    : seen && seen.via === "mirror" ? "mirroring the client"
     : "mirroring the client";
   if (value.textContent && value.textContent !== said) {
     const pill = $("#identity");            // acknowledge the change, briefly

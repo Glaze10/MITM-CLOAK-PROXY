@@ -30,31 +30,28 @@ function rawResponse(d) {
   return lines.join("\n") + "\n\n" + ((d.response.body || {}).text || "");
 }
 
+const KNOWN_BY = {
+  tls: "recognised by its handshake",
+  preset: "the preset in force",
+  ua: "named by its own User-Agent",
+  family: "inferred from its handshake",
+  shape: "all its handshake gives away",
+};
+
 function cloakLine(d) {
   const c = d.cloak || {};
   if (!c.via) return "";
-  const how = c.via === "mirror"
+  const went = c.via === "mirror"
     ? "mirrored from this client's own handshake"
     : "a preset, in place of the client's";
+  const knownBy = KNOWN_BY[c.label_source];
   const who = c.label
-    ? `<b>${esc(c.label)}</b> (${esc(c.via)})`
-    : `<b>unrecognised client</b> (${esc(c.via)})`;
-  const exact = c.label && c.preset !== c.label ? ` · ${esc(c.preset)}` : "";
-  return `<p class="hint">TLS: ${who} — ${how}${exact}${
+    ? `<b>${esc(c.label)}</b>${knownBy ? ` (${esc(knownBy)})` : ""}`
+    : `<b>unnamed client</b>`;
+  // the minted name is the precise answer, so it stays where there's room for it
+  const exact = c.preset && c.preset !== c.label ? ` · ${esc(c.preset)}` : "";
+  return `<p class="hint">TLS: ${who} — ${went}${exact}${
     c.upstream ? ` · ${esc(c.upstream)}` : ""}${c.ms != null ? ` · ${c.ms} ms` : ""}</p>`;
-}
-
-/** Keep the reader's place when a flow updates under them.
-
-    A response arriving on the flow you're already reading re-renders both
-    halves; without this the pane scrolls itself back to the top mid-read. */
-function keepingScroll(fn) {
-  const req = $("#reqBody"), res = $("#resBody");
-  const same = state.detail && state.detail.id === lastId;
-  const top = [req.scrollTop, res.scrollTop];
-  fn();
-  lastId = state.detail ? state.detail.id : null;
-  if (same) { req.scrollTop = top[0]; res.scrollTop = top[1]; }
 }
 
 export function renderDetail() {

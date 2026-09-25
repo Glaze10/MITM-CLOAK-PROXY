@@ -16,7 +16,7 @@ from typing import Any, Callable, Optional
 from mitmproxy import options
 from mitmproxy.tools.dump import DumpMaster
 
-from cloakproxy.core import recorder as recorder_mod
+from cloakproxy.core import identify, recorder as recorder_mod
 from cloakproxy.core.recorder import Recorder
 from cloakproxy.core.rules import MatchReplace
 
@@ -272,43 +272,56 @@ class ProxyManager:
         self.emit("proxy", self.state())
         return self.state()
 
-    def preset_label(self, name: str, flow: Any = None) -> str:
-        """Say which client a fingerprint is, not which hash it hashed to.
+    def preset_label(self, name: str, flow: Any = None) -> tuple[str, str]:
+        """Name the identity this connection went out with, and say how we know.
 
         A mirrored identity is minted per client and named for its digest —
-        mc-6b4ed3697900 — which is exact and unreadable. The cloak recognises
-        most stacks by their ClientHello, and that name ("chrome-151-windows")
-        is the answer to the question this column is really asking.
-
-        It answers with nothing when the stack wasn't recognised. The preset the
-        mirror was *built* from is only a base for headers and H2 settings, and
-        for an unknown client that's whatever the fallback happens to be —
-        labelling a Python script "ios-safari-18" would be worse than saying
-        nothing, because the bytes on the wire are still the script's own.
+        mc-6b4ed3697900 — which is exact and unreadable. In order of confidence:
+        the cloak's own preset match (browsers, exact), the HTTP library the
+        User-Agent names, the TLS family the handshake belongs to, and failing
+        all of that the shape of the handshake. The source travels with the
+        label so the interface can show the difference between knowing and
+        inferring.
         """
         if not name:
-            return ""
+            return "", ""
         if not name.startswith("mc-"):
-            return name                       # a built-in preset names itself
+            return name, "preset"             # a built-in preset names itself
         if name in self._labels:
             return self._labels[name]
-        label = ""
+        answer = ("", "")
         try:
             conn = getattr(getattr(flow, "client_conn", None), "id", None)
             profile = self.bridge._profiles.get(conn) if conn else None
+            hello = getattr(profile, "hello", None)
             # Recognised by its handshake? Then the cloak already worked out which
             # build this is, including the platform, which it takes from the
             # User-Agent — Chrome on Android and on Windows share a TLS stack, so
             # the handshake alone would call an Android phone "windows".
-            if profile is not None and self.bridge.identifier.match(profile.hello.family_id):
+            if hello is not None and self.bridge.identifier.match(hello.family_id):
                 doc = self.bridge.mirror.document(name) or {}
                 spec = doc.get("preset") if isinstance(doc.get("preset"), dict) else {}
-                label = doc.get("based_on") or spec.get("based_on") or ""
+                exact = doc.get("based_on") or spec.get("based_on") or ""
+                if exact:
+                    answer = (exact, "tls")
+            if not answer[0]:
+                req = getattr(flow, "request", None)
+                ua = ""
+                if req is not None:
+                    try:
+                        ua = req.headers.get("user-agent", "") or ""
+                    except Exception:  # pylint: disable=broad-except
+                        ua = ""
+                answer = tuple(identify.describe(hello, ua))
         except Exception:  # pylint: disable=broad-except
-            label = ""                        # a private corner of the cloak
-        if label:
-            self._labels[name] = label        # one digest is one client stack
-        return label
+            answer = ("", "")                 # a private corner of the cloak
+        # Only the exact preset match is cached against the digest. Everything
+        # else is per-request: two apps share one stack, so a name taken from a
+        # User-Agent — or a family inferred when one request happened to carry
+        # no User-Agent — would otherwise be pinned to every client on it.
+        if answer[1] == "tls":
+            self._labels[name] = answer
+        return answer
 
     async def configure(self, *, mode: Optional[str] = None, preset: Optional[str] = None,
                         allow_hosts: Optional[str] = None,

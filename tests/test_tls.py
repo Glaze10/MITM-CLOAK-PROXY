@@ -138,11 +138,14 @@ class _FakeBridge:
 class _FakeFlow:
     client_conn = type("C", (), {"id": "conn-1"})()
 
+    def __init__(self, user_agent="okhttp/4.12.0"):
+        self.request = type("R", (), {"headers": {"user-agent": user_agent}})()
+
 
 def test_a_built_in_preset_names_itself():
     pm = ProxyManager(lambda *a: None)
-    assert pm.preset_label("chrome-151", _FakeFlow()) == "chrome-151"
-    assert pm.preset_label("", _FakeFlow()) == ""
+    assert pm.preset_label("chrome-151", _FakeFlow()) == ("chrome-151", "preset")
+    assert pm.preset_label("", _FakeFlow()) == ("", "")
 
 
 def test_a_recognised_client_is_named_by_the_build_the_cloak_chose():
@@ -150,12 +153,27 @@ def test_a_recognised_client_is_named_by_the_build_the_cloak_chose():
     pm.bridge = _FakeBridge(recognised=True)
     # the platform comes from the User-Agent, so the answer is the refined base,
     # not the TLS family the handshake alone matched
-    assert pm.preset_label("mc-abc123", _FakeFlow()) == "chrome-151-android"
+    assert pm.preset_label("mc-abc123", _FakeFlow()) == ("chrome-151-android", "tls")
 
 
-def test_an_unrecognised_client_is_not_given_a_name_it_does_not_have():
+def test_an_unrecognised_client_falls_back_to_what_can_be_worked_out():
+    """Its handshake is still its own on the wire; the name just isn't exact.
+
+    The fallback preset's name would be a lie, so it isn't used — but silence
+    isn't the only alternative, and a stack family or a self-reported library
+    beats an empty column.
+    """
     pm = ProxyManager(lambda *a: None)
     pm.bridge = _FakeBridge(recognised=False)
-    # its handshake is still its own on the wire; there is simply no name for it,
-    # and the fallback preset's name would be a lie
-    assert pm.preset_label("mc-abc123", _FakeFlow()) == ""
+    label, source = pm.preset_label("mc-abc123", _FakeFlow())
+    assert (label, source) == ("okhttp/4.12.0", "ua")   # the flow's User-Agent
+
+
+def test_a_user_agent_name_is_not_cached_against_the_handshake():
+    """Two apps can share a stack, so the digest doesn't determine the name."""
+    pm = ProxyManager(lambda *a: None)
+    pm.bridge = _FakeBridge(recognised=False)
+    first = pm.preset_label("mc-abc123", _FakeFlow("okhttp/4.12.0"))
+    second = pm.preset_label("mc-abc123", _FakeFlow("Dart/3.3 (dart:io)"))
+    assert first == ("okhttp/4.12.0", "ua")
+    assert second == ("Dart/3.3", "ua")
