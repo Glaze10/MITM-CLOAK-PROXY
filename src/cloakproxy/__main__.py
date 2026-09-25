@@ -212,6 +212,83 @@ def _run_windowed(args: argparse.Namespace, url: str) -> int:
     return 0
 
 
+_JOB_HANDLE = None      # keep the job object alive for the parent's lifetime
+
+
+def _free_ui_port(ui_port: int) -> None:
+    """Kill any server left listening on the UI port from a previous run.
+
+    An orphaned server (a window that was force-killed or crashed) keeps the
+    port and its old capture, so the next launch would attach to stale state —
+    a project you closed would reappear. Clearing it guarantees a clean slate.
+    """
+    if sys.platform != "win32":
+        return
+    import subprocess  # pylint: disable=import-outside-toplevel
+    try:
+        out = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True,
+                             text=True, timeout=5).stdout
+    except Exception:  # pylint: disable=broad-except
+        return
+    pids = set()
+    for line in out.splitlines():
+        if f":{ui_port} " in line and "LISTENING" in line:
+            pids.add(line.split()[-1])
+    for pid in pids:
+        try:
+            subprocess.run(["taskkill", "/PID", pid, "/F"], capture_output=True, timeout=5)
+        except Exception:  # pylint: disable=broad-except
+            pass
+
+
+def _tie_child_to_parent(pid: int) -> None:
+    """Put the child server in a job object that kills it when this process ends.
+
+    So the server can never outlive the window, however the window dies —
+    normal close, crash or force-kill. No more orphaned servers holding the port.
+    """
+    global _JOB_HANDLE
+    if sys.platform != "win32":
+        return
+    import ctypes  # pylint: disable=import-outside-toplevel
+    from ctypes import wintypes  # pylint: disable=import-outside-toplevel
+    try:
+        k = ctypes.windll.kernel32
+
+        class BASIC(ctypes.Structure):
+            _fields_ = [("PerProcessUserTimeLimit", wintypes.LARGE_INTEGER),
+                        ("PerJobUserTimeLimit", wintypes.LARGE_INTEGER),
+                        ("LimitFlags", wintypes.DWORD),
+                        ("MinimumWorkingSetSize", ctypes.c_size_t),
+                        ("MaximumWorkingSetSize", ctypes.c_size_t),
+                        ("ActiveProcessLimit", wintypes.DWORD),
+                        ("Affinity", ctypes.c_void_p),
+                        ("PriorityClass", wintypes.DWORD),
+                        ("SchedulingClass", wintypes.DWORD)]
+
+        class IOC(ctypes.Structure):
+            _fields_ = [("r", ctypes.c_ulonglong), ("w", ctypes.c_ulonglong),
+                        ("o", ctypes.c_ulonglong), ("rt", ctypes.c_ulonglong),
+                        ("wt", ctypes.c_ulonglong), ("ot", ctypes.c_ulonglong)]
+
+        class EXT(ctypes.Structure):
+            _fields_ = [("BasicLimitInformation", BASIC), ("IoInfo", IOC),
+                        ("ProcessMemoryLimit", ctypes.c_size_t),
+                        ("JobMemoryLimit", ctypes.c_size_t),
+                        ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                        ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+        job = k.CreateJobObjectW(None, None)
+        info = EXT()
+        info.BasicLimitInformation.LimitFlags = 0x2000   # KILL_ON_JOB_CLOSE
+        k.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info))
+        handle = k.OpenProcess(0x1F0FFF, False, pid)     # PROCESS_ALL_ACCESS
+        k.AssignProcessToJobObject(job, handle)
+        _JOB_HANDLE = job                                # hold it open
+    except Exception as exc:  # pylint: disable=broad-except
+        LOG.warning("couldn't tie the server to this process: %s", exc)
+
+
 def _spawn_server(args: argparse.Namespace):
     """Start the UI+proxy as a child process. Returns the Popen, or None."""
     import subprocess  # pylint: disable=import-outside-toplevel
@@ -221,6 +298,7 @@ def _spawn_server(args: argparse.Namespace):
     interp = str(pyw) if pyw.exists() else exe
     if not interp:
         return None
+    _free_ui_port(args.ui_port)             # clear any orphan from a previous run
     cmd = [interp, "-m", "cloakproxy", "--no-window",
            "--ui-port", str(args.ui_port), "--port", str(args.port),
            "--mode", args.mode, "--preset", args.preset]
@@ -228,7 +306,9 @@ def _spawn_server(args: argparse.Namespace):
         cmd.append("--no-start")
     try:
         flags = 0x08000000 if sys.platform == "win32" else 0   # CREATE_NO_WINDOW
-        return subprocess.Popen(cmd, creationflags=flags)
+        proc = subprocess.Popen(cmd, creationflags=flags)
+        _tie_child_to_parent(proc.pid)      # dies with this process, never orphans
+        return proc
     except Exception as exc:  # pylint: disable=broad-except
         LOG.warning("couldn't start the server process (%s); running in-thread", exc)
         return None
