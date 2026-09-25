@@ -3,38 +3,105 @@ import { $, $$, api, asCurl, copy, esc, fmtSize, MARKS, state, toast } from "./c
 import { showDetail } from "./detail.js";
 import { addRepeaterTab } from "./repeater.js";
 
-/* ── rendering ───────────────────────────────────────────────────────── */
-function rowHtml(f) {
-  const cls = [
+/* ── rendering ───────────────────────────────────────────────────────────
+   Rows are kept as live elements and patched in place. Rebuilding the table's
+   innerHTML on every event — twice per request, since a request and its
+   response both arrive — is what made the whole view look like it was
+   reloading itself while traffic came in. */
+const rowEls = new Map();          // flow id -> <tr>
+
+const CELLS = 9;
+
+function rowClass(f) {
+  return [
     state.selected.has(f.id) ? "sel" : "",
     (f.intercepted || f.state === "paused") ? "paused" : "",
     f.imported ? "imported" : "",
     f.marked ? "m-" + f.marked : "",
   ].filter(Boolean).join(" ");
-  const via = (f.cloak || {}).via || "";
-  const tls = via === "mirror" ? "mirror" : via === "static" ? "preset" : "";
-  const sc = f.status ? String(f.status)[0] : "0";
-  return `<tr data-id="${f.id}" class="${cls}">
-    <td>${f.marked ? `<span class="markdot mark-${f.marked}"></span>` : ""}</td>
-    <td>${esc(f.method)}</td><td>${esc(f.host)}</td><td>${esc(f.path)}</td>
-    <td class="status-${sc}">${f.status ?? (f.state === "paused" ? "···" : "—")}</td>
-    <td>${esc(f.mime || "")}</td><td>${fmtSize(f.size)}</td>
-    <td>${f.ms != null ? f.ms + " ms" : ""}</td>
-    <td class="tls-${via}">${tls}</td></tr>`;
 }
 
+function fillRow(tr, f) {
+  const td = tr.children;
+  const cls = rowClass(f);
+  if (tr.className !== cls) tr.className = cls;
+  const dot = f.marked ? `<span class="markdot mark-${f.marked}"></span>` : "";
+  if (td[0].dataset.mark !== (f.marked || "")) {
+    td[0].innerHTML = dot;
+    td[0].dataset.mark = f.marked || "";
+  }
+  const via = (f.cloak || {}).via || "";
+  const set = (i, text, cls2) => {
+    if (td[i].textContent !== text) td[i].textContent = text;
+    if (cls2 !== undefined && td[i].className !== cls2) td[i].className = cls2;
+  };
+  set(1, f.method || "");
+  set(2, f.host || "");
+  set(3, f.path || "");
+  set(4, String(f.status ?? (f.state === "paused" ? "···" : "—")),
+      "status-" + (f.status ? String(f.status)[0] : "0"));
+  set(5, f.mime || "");
+  set(6, fmtSize(f.size));
+  set(7, f.ms != null ? f.ms + " ms" : "");
+  set(8, via === "mirror" ? "mirror" : via === "static" ? "preset" : "", "tls-" + via);
+}
+
+function rowFor(id) {
+  let tr = rowEls.get(id);
+  if (!tr) {
+    tr = document.createElement("tr");
+    tr.dataset.id = id;
+    for (let i = 0; i < CELLS; i++) tr.appendChild(document.createElement("td"));
+    rowEls.set(id, tr);
+    tr.classList.add("fresh");     // a brief settle, so new traffic reads as new
+    setTimeout(() => tr.classList.remove("fresh"), 700);
+  }
+  fillRow(tr, state.flows.get(id) || { id });
+  return tr;
+}
+
+function atBottom(pane) {
+  return pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 40;
+}
+
+function follow(pane, was) {
+  if (state.prefs.follow && was) pane.scrollTop = pane.scrollHeight;
+}
+
+function paintCounts() {
+  $("#histCount").textContent = state.order.length;
+  // an empty grid looks broken; say what the proxy is waiting for instead
+  $("#noFlows").classList.toggle("hidden", state.order.length > 0);
+  const n = state.selected.size;
+  const info = $("#selInfo");
+  const text = n > 1 ? `${n} selected` : "";
+  if (info.textContent !== text) info.textContent = text;
+}
+
+/** Bring the table in line with state.order, touching as little as possible. */
 export function renderFlows() {
   const body = $("#rows");
-  const atBottom = body.parentElement.parentElement.scrollTop + 40 >=
-    body.parentElement.parentElement.scrollHeight - body.parentElement.parentElement.clientHeight;
-  body.innerHTML = state.order.map((id) => rowHtml(state.flows.get(id))).filter(Boolean).join("");
-  $("#histCount").textContent = state.order.length;
-  const n = state.selected.size;
-  $("#selInfo").textContent = n > 1 ? `${n} selected` : "";
-  if (state.prefs.follow && atBottom) {
-    const pane = $("#flowPane");
-    pane.scrollTop = pane.scrollHeight;
+  const pane = $("#flowPane");
+  const was = atBottom(pane);
+  for (const id of rowEls.keys()) if (!state.flows.has(id)) rowEls.delete(id);
+  let i = 0;
+  for (const id of state.order) {
+    const want = rowFor(id);
+    if (body.children[i] !== want) body.insertBefore(want, body.children[i] || null);
+    i++;
   }
+  while (body.children.length > state.order.length) body.lastChild.remove();
+  paintCounts();
+  follow(pane, was);
+}
+
+/** Re-style only the rows whose selection or highlight changed. */
+export function repaintRows(ids) {
+  for (const id of ids || state.order) {
+    const tr = rowEls.get(id), f = state.flows.get(id);
+    if (tr && f) fillRow(tr, f);
+  }
+  paintCounts();
 }
 
 export function setFlows(rows) {
@@ -46,13 +113,27 @@ export function setFlows(rows) {
 
 export function upsertFlow(f) {
   const known = state.flows.has(f.id);
-  state.flows.set(f.id, { ...(state.flows.get(f.id) || {}), ...f });
-  if (!known) {
+  const merged = { ...(state.flows.get(f.id) || {}), ...f };
+  state.flows.set(f.id, merged);
+  const body = $("#rows"), pane = $("#flowPane");
+  const was = atBottom(pane);
+  if (known) {
+    const tr = rowEls.get(f.id);
+    if (tr) fillRow(tr, merged);
+    else renderFlows();
+  } else {
     state.order.push(f.id);
+    body.appendChild(rowFor(f.id));
     const max = state.prefs.maxRows || 2000;
-    while (state.order.length > max) state.flows.delete(state.order.shift());
+    while (state.order.length > max) {
+      const gone = state.order.shift();
+      state.flows.delete(gone);
+      rowEls.get(gone)?.remove();
+      rowEls.delete(gone);
+    }
+    paintCounts();
   }
-  renderFlows();
+  follow(pane, was);
   if (state.detail && state.detail.id === f.id) showDetail(f.id);
 }
 
@@ -67,6 +148,7 @@ export async function loadFlows() {
 
 /* ── selection ───────────────────────────────────────────────────────── */
 function selectRow(id, ev) {
+  const before = state.selected;
   if (ev.shiftKey && state.anchor) {
     const a = state.order.indexOf(state.anchor), b = state.order.indexOf(id);
     if (a > -1 && b > -1) {
@@ -79,7 +161,7 @@ function selectRow(id, ev) {
     state.selected = new Set([id]);
     state.anchor = id;
   }
-  renderFlows();
+  repaintRows([...new Set([...before, ...state.selected])]);
   if (state.selected.size === 1) showDetail([...state.selected][0]);
 }
 
@@ -89,12 +171,12 @@ export const selectedIds = () => [...state.selected];
 export async function markSelection(colour) {
   const ids = selectedIds();
   if (!ids.length) return;
-  await api("/api/mark", { method: "POST", body: { ids, colour } });
   for (const id of ids) {
     const f = state.flows.get(id);
     if (f) f.marked = colour || "";
   }
-  renderFlows();
+  repaintRows(ids);                       // the colour lands under the cursor
+  await api("/api/mark", { method: "POST", body: { ids, colour } });
 }
 
 /* ── context menu ────────────────────────────────────────────────────── */
@@ -102,9 +184,10 @@ function closeCtx() { $("#ctx").classList.add("hidden"); }
 
 function openCtx(x, y, id) {
   if (!state.selected.has(id)) {
+    const before = state.selected;
     state.selected = new Set([id]);
     state.anchor = id;
-    renderFlows();
+    repaintRows([...before, id]);
     showDetail(id);
   }
   const n = state.selected.size;
@@ -154,7 +237,7 @@ async function runCtxAction(act, id) {
     window.location = `/api/har?name=cloak-selection.har&ids=${ids.join(",")}`;
   } else if (act === "select-host") {
     state.selected = new Set(state.order.filter((i) => (state.flows.get(i) || {}).host === f.host));
-    renderFlows();
+    repaintRows();
   } else if (act === "filter-host") {
     state.filter = { ...state.filter, host: f.host || "" };
     await loadFlows();
@@ -185,11 +268,13 @@ export function initFlows() {
   });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") closeCtx();
-    if (e.target.matches("input, textarea, select")) return;
+    // typing in a field is not a shortcut; guard the check itself, since the
+    // event target isn't always an element
+    if (e.target?.matches?.("input, textarea, select")) return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
       e.preventDefault();
       state.selected = new Set(state.order);
-      renderFlows();
+      repaintRows();
     }
     const n = "123456".indexOf(e.key);          // 1-6 highlight, 0 clears
     if (n > -1 && state.selected.size) markSelection(MARKS[n]);

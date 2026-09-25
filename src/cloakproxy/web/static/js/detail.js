@@ -3,6 +3,7 @@ import { $, api, copy, draggable, esc, fmtSize, pretty, state, toast } from "./c
 import { addRepeaterTab } from "./repeater.js";
 
 let raw = false;          // pretty vs raw, shared by both halves
+let lastId = null;        // whose content the panes are currently showing
 
 const headerTable = (pairs) =>
   `<table class="kv">${(pairs || []).map(([k, v]) =>
@@ -39,7 +40,24 @@ function cloakLine(d) {
     c.ms != null ? ` · ${c.ms} ms` : ""}</p>`;
 }
 
+/** Keep the reader's place when a flow updates under them.
+
+    A response arriving on the flow you're already reading re-renders both
+    halves; without this the pane scrolls itself back to the top mid-read. */
+function keepingScroll(fn) {
+  const req = $("#reqBody"), res = $("#resBody");
+  const same = state.detail && state.detail.id === lastId;
+  const top = [req.scrollTop, res.scrollTop];
+  fn();
+  lastId = state.detail ? state.detail.id : null;
+  if (same) { req.scrollTop = top[0]; res.scrollTop = top[1]; }
+}
+
 export function renderDetail() {
+  keepingScroll(() => renderDetailNow());
+}
+
+function renderDetailNow() {
   const d = state.detail;
   if (!d) {
     $("#reqBody").innerHTML = `<p class="empty">Pick a flow.</p>`;

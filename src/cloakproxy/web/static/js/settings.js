@@ -5,6 +5,8 @@
 import { $, $$, api, esc, state, toast } from "./core.js";
 import { loadFlows } from "./flows.js";
 
+const dismissed = new Set();      // notices this session has been told to stop showing
+
 /* ── which TLS identity is in play ───────────────────────────────────── */
 export function paintIdentity(s = state.proxy) {
   const mode = s.mode || "auto";
@@ -12,7 +14,14 @@ export function paintIdentity(s = state.proxy) {
   const value = $("#idValue");
 
   // the title bar always says what will go out, in words, not settings
-  value.textContent = mirroring ? "mirroring the client" : `custom · ${s.preset || "—"}`;
+  const said = mirroring ? "mirroring the client" : `custom · ${s.preset || "—"}`;
+  if (value.textContent && value.textContent !== said) {
+    const pill = $("#identity");            // acknowledge the change, briefly
+    pill.classList.remove("changed");
+    void pill.offsetWidth;                  // restart the animation
+    pill.classList.add("changed");
+  }
+  value.textContent = said;
   value.classList.toggle("fallback", !mirroring);
   $("#identity").title = mirroring
     ? `Each connection goes out with the client's own TLS fingerprint.\n` +
@@ -37,10 +46,17 @@ export async function refreshCloakStats() {
   $("#statStatic").textContent = c.static ?? 0;
   // A fingerprint the cloak can't complete fails every request, and the app has
   // no console to notice that in — so the warning goes where the choice is made.
+  // It can be dismissed: some of these are advisories that stay true for the
+  // whole session, and a warning that can't be put away stops being read.
   const box = $("#cloakNotices");
-  const notices = c.notices || [];
-  box.innerHTML = notices.map((n) =>
-    `<p class="notice ${esc(n.level)}">${esc(n.text)}</p>`).join("");
+  const notices = (c.notices || []).filter((n) => !dismissed.has(n.text));
+  const sig = notices.map((n) => n.text).join(" ");
+  if (sig !== box.dataset.sig) {
+    box.innerHTML = notices.map((n) => `<p class="notice ${esc(n.level)}">
+      <span>${esc(n.text)}</span>
+      <button class="x" title="Dismiss" data-drop="${esc(n.text)}">×</button></p>`).join("");
+    box.dataset.sig = sig;
+  }
   box.classList.toggle("hidden", !notices.length);
 }
 
@@ -66,23 +82,41 @@ export function paintSettings(s = state.proxy) {
   paintIdentity(s);
 }
 
-/** Settings that only bite on the next start are applied by restarting. */
-async function applyAndMaybeRestart(patch) {
+/** The identity: applied on the running proxy, no restart, no waiting. */
+async function applyIdentity(patch = {}) {
+  const body = {
+    mode: $('#modeChoices input:checked')?.value || "auto",
+    preset: $("#setPreset").value,
+    ...patch,
+  };
+  // Paint first. The answer is never in doubt — the server is being told, not
+  // asked — and waiting a round trip to move a radio button is what made this
+  // feel slow.
+  paintIdentity({ ...state.proxy, ...body });
+  state.proxy = await api("/api/proxy/config", { method: "POST", body });
+  paintSettings(state.proxy);
+}
+
+/** The listener: a new port genuinely needs the proxy rebuilt. */
+async function applyListener(patch = {}) {
   const running = state.proxy.running;
-  if (running) await api("/api/proxy/stop", { method: "POST" });
-  const s = await api("/api/proxy/start", {
-    method: "POST",
-    body: {
-      port: +$("#setPort").value,
-      mode: $('#modeChoices input:checked')?.value || "auto",
-      preset: $("#setPreset").value,
-      allow_hosts: $("#setAllow").value,
-      ...patch,
-    },
-  });
+  const body = {
+    port: +$("#setPort").value,
+    mode: $('#modeChoices input:checked')?.value || "auto",
+    preset: $("#setPreset").value,
+    allow_hosts: $("#setAllow").value,
+    ...patch,
+  };
+  if (running && body.port === state.proxy.port) {      // only the host list moved
+    state.proxy = await api("/api/proxy/config", { method: "POST", body });
+    paintSettings(state.proxy);
+    return toast("Applied");
+  }
+  $("#statusText").textContent = running ? "restarting…" : "starting…";
+  const s = await api("/api/proxy/start", { method: "POST", body });
   state.proxy = s;
   paintSettings(s);
-  toast(running ? "Restarted with the new settings" : "Started");
+  if (!s.error) toast(running ? `Now listening on :${s.port}` : `Listening on :${s.port}`);
 }
 
 /* ── projects ────────────────────────────────────────────────────────── */
@@ -147,7 +181,7 @@ function initCustomTls() {
       ? "" : `<option value="${esc(name)}" selected>${esc(name)}</option>`;
     $("#setPreset").value = name;
     $('#modeChoices input[value="static"]').checked = true;
-    await applyAndMaybeRestart({ mode: "static", preset: name });
+    await applyIdentity({ mode: "static", preset: name });
     toast(`Now presenting ${name} on every connection`);
   };
 
@@ -179,12 +213,18 @@ function initCustomTls() {
 
 export function initSettings() {
   initCustomTls();
-  $$("#modeChoices input").forEach((r) => {
-    r.onchange = () => { applyAndMaybeRestart({}); };
+  $("#cloakNotices").addEventListener("click", (e) => {
+    const drop = e.target.closest("[data-drop]");
+    if (!drop) return;
+    dismissed.add(drop.dataset.drop);
+    refreshCloakStats();
   });
-  $("#setPreset").onchange = () => applyAndMaybeRestart({});
-  $("#setPort").onchange = () => applyAndMaybeRestart({});
-  $("#setAllow").onchange = () => applyAndMaybeRestart({});
+  $$("#modeChoices input").forEach((r) => {
+    r.onchange = () => applyIdentity();
+  });
+  $("#setPreset").onchange = () => applyIdentity();
+  $("#setPort").onchange = () => applyListener();
+  $("#setAllow").onchange = () => applyListener();
 
   $("#btnCert").onclick = async () => {
     const c = await api("/api/cert");

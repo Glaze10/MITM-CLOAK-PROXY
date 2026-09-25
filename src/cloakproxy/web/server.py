@@ -74,6 +74,11 @@ class ProxyHandler(Base):
                                              mode=body.get("mode", ""),
                                              preset=body.get("preset", ""),
                                              allow_hosts=body.get("allow_hosts")))
+        elif action == "config":
+            # identity changes apply live; only the port needs a restart
+            self.send(await self.proxy.configure(mode=body.get("mode"),
+                                                 preset=body.get("preset"),
+                                                 allow_hosts=body.get("allow_hosts")))
         elif action == "stop":
             self.send(await self.proxy.stop())
         else:
@@ -326,6 +331,18 @@ class CloakHandler(Base):
                    "notices": self.proxy.notices.as_list()})
 
 
+class FreshStatic(tornado.web.StaticFileHandler):
+    """Serve the interface without letting the window cache an old copy.
+
+    The UI is ES modules loaded straight from disk, and a webview that holds on
+    to yesterday's module after an update looks exactly like a bug in the app.
+    Revalidation costs nothing over localhost.
+    """
+
+    def set_extra_headers(self, path: str) -> None:
+        self.set_header("Cache-Control", "no-cache, must-revalidate")
+
+
 class EventSocket(tornado.websocket.WebSocketHandler):
     def initialize(self, hub: Hub, proxy: ProxyManager) -> None:  # noqa: D102
         self.hub = hub
@@ -355,7 +372,7 @@ def make_app(proxy: ProxyManager, hub: Hub) -> tornado.web.Application:
         [
             (r"/", IndexHandler),
             (r"/api/state", StateHandler, common),
-            (r"/api/proxy/(start|stop)", ProxyHandler, common),
+            (r"/api/proxy/(start|stop|config)", ProxyHandler, common),
             (r"/api/flows", FlowsHandler, common),
             (r"/api/flows/([^/]+)", FlowHandler, common),
             (r"/api/intercept", InterceptHandler, common),
@@ -368,7 +385,7 @@ def make_app(proxy: ProxyManager, hub: Hub) -> tornado.web.Application:
             (r"/api/projects", ProjectsHandler, common),
             (r"/api/cert", CertHandler, common),
             (r"/ws", EventSocket, dict(hub=hub, proxy=proxy)),
-            (r"/static/(.*)", tornado.web.StaticFileHandler, {"path": str(STATIC)}),
+            (r"/static/(.*)", FreshStatic, {"path": str(STATIC)}),
         ],
         template_path=str(STATIC),
         debug=False,

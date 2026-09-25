@@ -61,3 +61,33 @@ def test_notices_are_bounded():
     for i in range(10):
         n.emit(_record("mitmcloak", f"warning {i}"))
     assert [r["text"] for r in n.as_list()] == ["warning 7", "warning 8", "warning 9"]
+
+
+def test_switching_identity_does_not_rebuild_the_proxy():
+    """The whole point of configure(): mirror <-> preset without a restart.
+
+    The cloak reads its mode and preset per request, so a switch is an option
+    update. If this ever goes back through start(), the interface goes quiet for
+    a second and every open connection is dropped on a radio-button click.
+    """
+    import asyncio
+
+    async def go():
+        pm = ProxyManager(lambda *a: None)
+        state = await pm.start(port=8097, mode="auto", preset="chrome-151")
+        assert state["running"], state["error"]
+        master, task = pm.master, pm._task
+        try:
+            after = await pm.configure(mode="static", preset="firefox-latest")
+            assert (after["mode"], after["preset"]) == ("static", "firefox-latest")
+            assert pm.master is master and pm._task is task   # same proxy, still up
+            assert pm.master.options.mitmcloak_mode == "static"
+            assert pm.master.options.mitmcloak_preset == "firefox-latest"
+
+            back = await pm.configure(mode="auto")
+            assert back["mode"] == "auto" and back["preset"] == "firefox-latest"
+            assert pm.master is master and pm.running
+        finally:
+            await pm.stop()
+
+    asyncio.run(go())

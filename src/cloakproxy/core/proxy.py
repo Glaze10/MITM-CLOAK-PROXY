@@ -26,6 +26,26 @@ DEFAULT_MODE = "auto"          # auto | mirror | static  (see mitmcloak)
 DEFAULT_PRESET = "ios-safari-18"
 
 
+def lan_address() -> str:
+    """The address a phone on the same network should be pointed at.
+
+    "your machine's IP" is a small chore to look up, and it's the one thing
+    standing between a fresh install and traffic, so Cloak works it out.
+    """
+    import socket  # pylint: disable=import-outside-toplevel
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.connect(("10.255.255.255", 1))          # no packets, just routing
+        return str(probe.getsockname()[0])
+    except OSError:
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except OSError:
+            return "127.0.0.1"
+    finally:
+        probe.close()
+
+
 def available_presets() -> list[str]:
     try:
         import httpcloak  # pylint: disable=import-outside-toplevel
@@ -118,6 +138,7 @@ class ProxyManager:
             "mode": self.mode,
             "preset": self.preset,
             "allow_hosts": self.allow_hosts,
+            "lan_ip": lan_address(),
             "presets": available_presets(),
             "flows": len(self.recorder.flows),
             "paused": len(self.recorder.paused),
@@ -209,6 +230,37 @@ class ProxyManager:
                               or f"couldn't listen on port {self.port} — already in use?")
                 await self.stop()
                 return self.state()
+        self.emit("proxy", self.state())
+        return self.state()
+
+    async def configure(self, *, mode: Optional[str] = None, preset: Optional[str] = None,
+                        allow_hosts: Optional[str] = None) -> dict[str, Any]:
+        """Change the identity without restarting anything.
+
+        The cloak reads its mode and preset from the options on every request, and
+        mitmproxy applies allow_hosts the same way — so none of this needs the
+        proxy torn down and rebuilt. Only the listening port does, which is what
+        start() is for. Switching between mirroring and a preset is meant to feel
+        like flicking a switch, not like restarting a server.
+        """
+        if mode is not None:
+            self.mode = mode
+        if preset is not None:
+            self.preset = preset
+        if allow_hosts is not None:
+            self.allow_hosts = allow_hosts
+
+        if self.master is not None:
+            update: dict[str, Any] = {"mitmcloak_mode": self.mode,
+                                      "mitmcloak_preset": self.preset}
+            if allow_hosts is not None:
+                update["allow_hosts"] = [h.strip() for h in self.allow_hosts.split(",")
+                                         if h.strip()]
+            try:
+                self.master.options.update(**update)
+            except Exception as exc:  # pylint: disable=broad-except
+                self.error = f"{type(exc).__name__}: {exc}"
+                LOG.warning("couldn't apply %s live: %s", update, exc)
         self.emit("proxy", self.state())
         return self.state()
 

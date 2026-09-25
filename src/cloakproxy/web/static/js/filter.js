@@ -67,7 +67,7 @@ export function initFilter() {
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") close();
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f" &&
-        !e.target.matches("input, textarea")) {
+        !e.target?.matches?.("input, textarea")) {
       e.preventDefault();
       open();
     }

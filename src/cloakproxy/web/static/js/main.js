@@ -1,5 +1,5 @@
 /* Boot: wire the tab shell, the title bar, and the live event feed. */
-import { $, $$, api, state, toast } from "./core.js";
+import { $, $$, api, copy, state, toast } from "./core.js";
 import { initDetail } from "./detail.js";
 import { initFilter } from "./filter.js";
 import { initFlows, loadFlows, renderFlows, upsertFlow } from "./flows.js";
@@ -32,8 +32,17 @@ function initTabs() {
 }
 
 /* ── title bar ───────────────────────────────────────────────────────── */
+/** The address a device should be pointed at — the one thing needed to start. */
+function paintAddress(s) {
+  const addr = `${s.lan_ip || "127.0.0.1"}:${s.port}`;
+  const btn = $("#proxyAddr");
+  if (btn.textContent !== addr) btn.textContent = addr;
+  $("#noFlowsAddr").textContent = addr;
+}
+
 export function paintState(s) {
   state.proxy = s;
+  paintAddress(s);
   $("#dot").classList.toggle("on", !!s.running);
   $("#statusText").textContent = s.running
     ? `listening on :${s.port}` : s.error ? "stopped — see settings" : "stopped";
@@ -47,6 +56,11 @@ export function paintState(s) {
 }
 
 function initTitlebar() {
+  $("#proxyAddr").onclick = (e) => {
+    copy(e.target.textContent, "Address copied");
+    e.target.classList.add("copied");
+    setTimeout(() => e.target.classList.remove("copied"), 1100);
+  };
   $("#btnToggle").onclick = async () => {
     const running = state.proxy.running;
     paintState(await api(running ? "/api/proxy/stop" : "/api/proxy/start", {

@@ -1,10 +1,13 @@
 /* Cloak — one stylesheet, no framework. Dark by default because this is a tool
    people keep open all day next to a terminal. */
 :root {
-  --bg: #0e1015; --bg2: #141821; --bg3: #1a1f2b; --bg4: #212736;
-  --line: #272d3b; --line2: #333b4d;
-  --fg: #d8dce6; --dim: #8a93a6; --dim2: #667085;
-  --accent: #5aa9ff; --accent-dim: #2b5f9e;
+  --bg: #101116; --bg2: #171820; --bg3: #1d1f29; --bg4: #252734;
+  --line: #2a2c39; --line2: #383b4b;
+  --fg: #dcdce4; --dim: #9096a6; --dim2: #6d7285;
+  --accent: #6fb0ff; --accent-dim: #2f5e96; --accent-warm: #ffb27a;
+  --glow: rgba(111, 176, 255, .13);
+  --ease: cubic-bezier(.22, .61, .36, 1);
+  --fast: 120ms var(--ease); --calm: 200ms var(--ease);
   --ok: #4ec9a0; --warn: #e8b84b; --bad: #f2565f; --purple: #b98cff;
   --mark-red: #f2565f; --mark-orange: #f29f56; --mark-yellow: #e8d14b;
   --mark-green: #4ec9a0; --mark-blue: #5aa9ff; --mark-purple: #b98cff;
@@ -250,7 +253,115 @@ legend { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-s
 
 /* what the cloak wants you to know about the identity you picked */
 #cloakNotices { margin-top: 8px; }
-.notice { font-size: 11px; line-height: 1.45; padding: 6px 8px; margin: 4px 0;
+.notice { display: flex; gap: 8px; align-items: flex-start;
+  font-size: 11px; line-height: 1.45; padding: 6px 8px; margin: 4px 0;
   border-left: 2px solid var(--warn); background: rgba(210, 150, 60, .09);
   color: var(--fg); border-radius: 0 3px 3px 0; }
 .notice.error { border-left-color: var(--bad); background: rgba(220, 80, 80, .1); }
+
+
+/* ══ movement ════════════════════════════════════════════════════════════
+   Everything here is short and small. The point is that things arrive and
+   settle rather than snapping into place — a proxy that redraws hard on every
+   packet feels like it's struggling, even when it isn't. */
+
+button, input, select, textarea, .chip, .card, .choice label, .tabs button,
+.swatch, .queue-list li, .identity { transition:
+  background-color var(--fast), border-color var(--fast), color var(--fast),
+  box-shadow var(--fast), opacity var(--calm), filter var(--fast); }
+
+button:active { transform: translateY(.5px); }
+button:focus-visible, input:focus-visible, select:focus-visible,
+textarea:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--glow); }
+input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px var(--glow); }
+
+/* the running light breathes, so "live" is visible from across the room */
+.dot { transition: background-color var(--calm), box-shadow var(--calm); }
+.dot.on { animation: breathe 3.4s var(--ease) infinite; }
+@keyframes breathe {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(78, 201, 160, .45); }
+  50%      { box-shadow: 0 0 9px 2px rgba(78, 201, 160, .30); }
+}
+
+/* a new row arrives lit and cools off, so traffic reads as arriving */
+tr.fresh td { animation: arrive 700ms var(--ease); }
+@keyframes arrive {
+  from { background-color: rgba(111, 176, 255, .14); }
+  to   { background-color: transparent; }
+}
+table.flows tbody tr { transition: background-color var(--fast); }
+table.flows tbody tr.sel { background: #1e2a42; box-shadow: inset 2px 0 0 var(--accent); }
+table.flows tbody tr.sel td { color: #eef2fa; }
+
+/* the identity pill reacts when what it says changes */
+.identity.changed { animation: pulse 520ms var(--ease); }
+@keyframes pulse {
+  0%   { background: var(--bg4); border-color: var(--accent-dim); }
+  100% { background: var(--bg3); border-color: var(--line); }
+}
+.idValue { transition: color var(--calm); }
+
+/* panels and menus fade in instead of appearing */
+.modal { animation: fade 140ms var(--ease); }
+.modalBox { animation: rise 180ms var(--ease); }
+.ctx { animation: rise 120ms var(--ease); transform-origin: top left; }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes rise {
+  from { opacity: 0; transform: translateY(6px) scale(.99); }
+  to   { opacity: 1; transform: none; }
+}
+.toast { animation: toastIn 220ms var(--ease); }
+@keyframes toastIn {
+  from { opacity: 0; transform: translate(-50%, 10px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+
+/* warmth: a little depth on the surfaces you look at all day */
+.card { box-shadow: 0 1px 0 rgba(255, 255, 255, .02) inset, 0 6px 18px rgba(0, 0, 0, .16); }
+.card:hover { border-color: var(--line2); }
+.titlebar { box-shadow: 0 1px 0 rgba(255, 255, 255, .02) inset; }
+.tabs.top button { position: relative; }
+.tabs.top button.on::after {
+  content: ""; position: absolute; left: 16px; right: 16px; bottom: -1px; height: 2px;
+  background: var(--accent); border-radius: 2px 2px 0 0; animation: underline 200ms var(--ease); }
+@keyframes underline { from { transform: scaleX(.4); opacity: 0; } to { transform: none; opacity: 1; } }
+.tabs.top button.on { border-bottom-color: transparent; }
+.gutter-h, .gutter-v { transition: background-color var(--fast); }
+.gutter-h:hover, .gutter-v:hover { background: var(--accent-dim); }
+.swatch:hover { transform: scale(1.12); box-shadow: 0 0 0 2px var(--glow); }
+.swatch { transition: transform var(--fast), box-shadow var(--fast); }
+.stat b { transition: color var(--calm); }
+
+/* the preset control fading out when it stops mattering, rather than blinking */
+.dimmed { opacity: .45; transition: opacity var(--calm); }
+#presetHint, #presetLabel { transition: color var(--calm); }
+
+/* someone reading a capture at 2am should be able to turn this off */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important; animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important; }
+}
+
+/* ── the quiet state ─────────────────────────────────────────────────────
+   An empty table looks broken. This says the tool is working and waiting,
+   and answers the only question a new user has at that moment. */
+.nothing { display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 4px; padding: 46px 20px; color: var(--dim); text-align: center;
+  animation: fade 300ms var(--ease); }
+.nothing p { margin: 0; }
+.nothing .sub { color: var(--dim2); font-size: 12px; }
+.nothing b { color: var(--accent); font-family: var(--mono); font-weight: 500; }
+.nothing .ring { width: 30px; height: 30px; border-radius: 50%; margin-bottom: 10px;
+  border: 2px solid var(--line2); border-top-color: var(--accent);
+  animation: spin 2.4s linear infinite; opacity: .65; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+button.addr { font-family: var(--mono); color: var(--accent); background: var(--bg3);
+  border: 1px dashed var(--line2); padding: 1px 8px; border-radius: 5px; }
+button.addr:hover { border-style: solid; border-color: var(--accent-dim); background: var(--bg4); }
+button.addr.copied { color: var(--ok); border-color: var(--ok); }
+
+.notice button.x { flex: 0 0 auto; margin-left: auto; padding: 0 2px; line-height: 1;
+  font-size: 14px; color: var(--dim2); background: none; border: 0; }
+.notice button.x:hover { color: var(--fg); }

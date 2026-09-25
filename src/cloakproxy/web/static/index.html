@@ -67,6 +67,13 @@
             </tr></thead>
             <tbody id="rows"></tbody>
           </table>
+          <div class="nothing" id="noFlows">
+            <div class="ring"></div>
+            <p>Listening. Nothing has come through yet.</p>
+            <p class="sub">Point a device's HTTP proxy at
+              <b id="noFlowsAddr">—</b>, then install the CA from
+              <code>mitm.it</code> through it.</p>
+          </div>
         </div>
 
         <div class="gutter-h" id="gutterH" title="Drag to resize"></div>
@@ -138,7 +145,8 @@
           <label class="field"><span>Only these hosts</span>
             <input id="setAllow" placeholder="comma separated, blank for all">
           </label>
-          <p class="hint">Point the device's HTTP proxy at this machine's IP and that port.</p>
+          <p class="hint">Point the device's HTTP proxy at
+            <button class="addr" id="proxyAddr" title="Copy">—</button></p>
         </section>
 
         <section class="card" id="fingerprintCard">
