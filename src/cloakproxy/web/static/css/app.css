@@ -102,8 +102,14 @@ main { flex: 1 1 auto; min-height: 0; display: flex; }
 .halfbody { flex: 1 1 auto; overflow: auto; padding: 9px 11px; }
 
 /* ── flow table ───────────────────────────────────────────────────────── */
-table.flows { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
+/* Fixed layout, so the declared widths hold. Left to itself the table sizes to
+   its content, and one long path stretches it until status, size and TLS are
+   off the right-hand edge — the columns you were reading in order to find the
+   long path in the first place. */
+table.flows { width: 100%; table-layout: fixed; border-collapse: collapse;
+  font-family: var(--mono); font-size: 12px; }
 table.flows thead th { position: sticky; top: 0; z-index: 1; background: var(--bg2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--dim); text-align: left; font-weight: 500; padding: 6px 8px;
   border-bottom: 1px solid var(--line); font-family: var(--ui); }
 table.flows td { padding: 3px 8px; border-bottom: 1px solid #191d26; white-space: nowrap;
@@ -116,6 +122,9 @@ table.flows tbody tr.imported { opacity: .7; font-style: italic; }
 .c-mark { width: 16px; } .c-method { width: 66px; } .c-host { width: 190px; }
 .c-status { width: 54px; } .c-type { width: 120px; } .c-size { width: 66px; }
 .c-time { width: 62px; } .c-tls { width: 148px; }
+/* Path has no width on purpose: it takes whatever the others leave, which is
+   the column you actually want the space in. Dragging it wider scrolls the
+   table, which is the point of dragging it wider. */
 td.status-2 { color: var(--ok); } td.status-3 { color: var(--accent); }
 td.status-4 { color: var(--warn); } td.status-5, td.status-0 { color: var(--bad); }
 td.tls-mirror { color: var(--ok); } td.tls-static { color: var(--warn); }
@@ -450,3 +459,37 @@ button.addPort { color: var(--dim); border-style: dashed; }
 button.addPort:hover { color: var(--accent); border-color: var(--accent-dim); border-style: solid; }
 
 td.tls-unknown { color: var(--dim2); font-style: italic; }
+
+/* ── draggable columns ───────────────────────────────────────────────────
+   A path is as long as it is; rather than choose a width for everyone, let
+   the reader take space from a neighbouring column and give it back. */
+table.flows thead th { position: sticky; }
+/* inside the cell, since the header clips its overflow to keep the ellipsis */
+.colgrab { position: absolute; top: 0; right: 0; width: 8px; height: 100%;
+  cursor: col-resize; z-index: 2; }
+.colgrab::after { content: ""; position: absolute; right: 2px; top: 5px; bottom: 5px;
+  width: 1px; background: var(--line2); transition: background-color var(--fast); }
+.colgrab:hover::after, .colgrab.dragging::after { background: var(--accent); width: 2px; }
+body.resizing, body.resizing * { cursor: col-resize !important; user-select: none; }
+
+/* ── scrollbars ──────────────────────────────────────────────────────────
+   The platform's bars are built for a white page: a bright track and a heavy
+   thumb, both of which sit on top of a dark interface like something pasted
+   on. These recede until you reach for them. */
+* { scrollbar-width: thin; scrollbar-color: var(--line2) transparent; }
+
+::-webkit-scrollbar { width: 11px; height: 11px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: #2f3445; border-radius: 99px;
+  border: 3px solid transparent;            /* inset, so it floats off the edge */
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: #3d4356; background-clip: content-box; }
+::-webkit-scrollbar-thumb:active { background: var(--accent-dim); background-clip: content-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* the code panes get a slightly darker thumb, since their background is too */
+pre::-webkit-scrollbar-thumb, .halfbody::-webkit-scrollbar-thumb {
+  background: #343a4c; background-clip: content-box;
+}

@@ -374,9 +374,17 @@ class EventSocket(tornado.websocket.WebSocketHandler):
 
 
 class IndexHandler(tornado.web.RequestHandler):
+    """Serve the page from disk on every request.
+
+    render() would compile it as a template and cache that compilation, so an
+    edited page kept serving the old markup until the app was restarted — and
+    the page isn't a template, it's HTML.
+    """
+
     def get(self) -> None:
         self.set_header("Cache-Control", "no-store")
-        self.render(str(STATIC / "index.html"))
+        self.set_header("Content-Type", "text/html; charset=utf-8")
+        self.write((STATIC / "index.html").read_bytes())
 
 
 def make_app(proxy: ProxyManager, hub: Hub) -> tornado.web.Application:

@@ -301,8 +301,114 @@ async function runCtxAction(act, id) {
   closeCtx();
 }
 
+/* ── column widths ───────────────────────────────────────────────────────
+   Every column but Path has a set width, and Path takes what's left — the
+   path is what you scan, so it should have the room. But "what's left" is a
+   guess about someone else's screen, so the header is draggable and what you
+   choose is remembered.
+
+   The drag freezes the table first. At width:100% the browser owns the
+   leftover space and redistributes it as you pull, so the edge lags behind
+   the pointer and then catches up — it feels like the column is resisting.
+   Pinning every column and the table's total width makes the edge track the
+   pointer exactly, because nothing is left for the browser to decide. */
+const WIDTH_KEY = "cloak.colWidths";
+const MIN_COL = 34;
+
+function savedWidths() {
+  try { return JSON.parse(localStorage.getItem(WIDTH_KEY)) || {}; }
+  catch { return {}; }                      // private windows can throw on read
+}
+
+function storeWidths(map) {
+  try {
+    if (map) localStorage.setItem(WIDTH_KEY, JSON.stringify(map));
+    else localStorage.removeItem(WIDTH_KEY);
+  } catch { /* nothing to do if storage is unavailable */ }
+}
+
+const colKey = (th, i) => th.className || `col${i}`;
+
+/** Pin every column to the width it currently has, and the table to their sum. */
+function freeze(table, heads) {
+  const widths = heads.map((th) => th.offsetWidth);
+  heads.forEach((th, i) => { th.style.width = widths[i] + "px"; });
+  const total = widths.reduce((a, b) => a + b, 0);
+  table.style.width = total + "px";
+  return total;
+}
+
+function initColumns() {
+  const table = $("#historySplit table.flows");
+  const heads = $$("#historySplit thead th");
+  const saved = savedWidths();
+  if (Object.keys(saved).length) {
+    heads.forEach((th, i) => {
+      const w = saved[colKey(th, i)];
+      if (w) th.style.width = w + "px";
+    });
+    freeze(table, heads);                   // restore the frozen layout as a whole
+  }
+
+  heads.forEach((th, i) => {
+    if (i === heads.length - 1) return;     // nothing to take space from
+    const grab = document.createElement("div");
+    grab.className = "colgrab";
+    grab.title = "Drag to resize · double-click to reset all";
+    th.appendChild(grab);
+
+    grab.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      grab.setPointerCapture(e.pointerId);  // keep tracking outside the header
+      const startX = e.clientX;
+      const startTotal = freeze(table, heads);
+      const startW = th.offsetWidth;
+      grab.classList.add("dragging");
+      document.body.classList.add("resizing");
+
+      let pending = 0, dx = 0;
+      const apply = () => {
+        pending = 0;
+        const w = Math.max(MIN_COL, startW + dx);
+        th.style.width = w + "px";
+        table.style.width = (startTotal + (w - startW)) + "px";
+      };
+      const move = (ev) => {
+        dx = ev.clientX - startX;
+        // one update per frame: a pointer can outrun the renderer, and the
+        // extra layouts are what make a drag feel heavy
+        if (!pending) pending = requestAnimationFrame(apply);
+      };
+      const done = () => {
+        if (pending) { cancelAnimationFrame(pending); apply(); }
+        grab.classList.remove("dragging");
+        document.body.classList.remove("resizing");
+        grab.removeEventListener("pointermove", move);
+        grab.removeEventListener("pointerup", done);
+        grab.removeEventListener("pointercancel", done);
+        const map = {};
+        heads.forEach((h, j) => { map[colKey(h, j)] = h.offsetWidth; });
+        storeWidths(map);
+      };
+      grab.addEventListener("pointermove", move);
+      grab.addEventListener("pointerup", done);
+      grab.addEventListener("pointercancel", done);
+    });
+
+    grab.addEventListener("dblclick", (e) => {
+      e.preventDefault();                   // back to the stylesheet's widths
+      heads.forEach((h) => { h.style.width = ""; });
+      table.style.width = "";
+      storeWidths(null);
+      toast("Columns reset");
+    });
+  });
+}
+
 /* ── wiring ──────────────────────────────────────────────────────────── */
 export function initFlows() {
+  initColumns();
   $("#rows").addEventListener("click", (e) => {
     const tr = e.target.closest("tr[data-id]");
     if (tr) selectRow(tr.dataset.id, e);
