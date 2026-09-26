@@ -204,6 +204,12 @@
               <small>Send upstream whatever the device's own handshake was. Right for an app
                 or a browser talking straight to Cloak.</small>
             </label>
+            <label><input type="radio" name="mode" value="fallback">
+              <b>Mirror, else a preset</b>
+              <small>Mirror the client, but if an origin refuses the mirrored handshake
+                (some pin a cipher httpcloak can't complete), retry that host with the
+                preset below and remember it.</small>
+            </label>
             <label><input type="radio" name="mode" value="mirror">
               <b>Mirror only</b>
               <small>Same, but fail loudly rather than fall back. Use when the exact

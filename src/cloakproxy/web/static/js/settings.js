@@ -34,16 +34,22 @@ export function paintIdentity(s = state.proxy) {
       `${s.preset || "the preset"} is only used if a handshake can't be mirrored.`
     : `Every connection goes out as ${s.preset}, whatever the client really is.`;
 
-  // the preset control dims when it is only a fallback, and says so
+  // the preset control dims when it is only a last-resort fallback, and says so
   $$("#modeChoices label").forEach((l) =>
     l.classList.toggle("on", l.querySelector("input").value === mode));
   const field = $("#presetField");
-  field.classList.toggle("dimmed", mirroring);
-  $("#presetLabel").textContent = mirroring ? "Fallback preset" : "Preset (in use)";
-  $("#presetHint").innerHTML = mirroring
-    ? `Not used while mirroring works. It's the identity Cloak falls back to when
-       there's no client handshake to copy — behind another proxy, for instance.`
-    : `<b>In use for every connection.</b> The client's real fingerprint is ignored.`;
+  // in "fallback" the preset does real work (it's the on-failure identity), so
+  // it isn't dimmed; in plain mirror/auto it's only used when a hello can't be copied
+  field.classList.toggle("dimmed", mode === "auto" || mode === "mirror");
+  $("#presetLabel").textContent = mode === "static" ? "Preset (in use)" : "Fallback preset";
+  $("#presetHint").innerHTML =
+    mode === "static"
+      ? `<b>In use for every connection.</b> The client's real fingerprint is ignored.`
+    : mode === "fallback"
+      ? `Used when an origin refuses the mirrored handshake — Cloak retries that host
+         with this preset and remembers it. Also covers a client with no handshake to copy.`
+      : `Not used while mirroring works. It's the identity Cloak falls back to when
+         there's no client handshake to copy — behind another proxy, for instance.`;
 }
 
 export async function refreshCloakStats() {

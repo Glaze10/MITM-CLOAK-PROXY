@@ -193,6 +193,68 @@ class ProxyManager:
             "error": self.error,
         }
 
+    def _cloak_mode(self) -> str:
+        """Map our mode to one mitmcloak understands.
+
+        "fallback" is ours: mitmcloak runs in "auto" (mirror the client, use the
+        preset only when there's no handshake to copy), and on top of that the
+        bridge wrapper below retries with the preset when a mirror is refused.
+        """
+        return "auto" if self.mode == "fallback" else self.mode
+
+    def _install_fallback(self, bridge: Any) -> None:
+        """Wrap the bridge so a mirror that fails the upstream handshake retries
+        once with the preset, and pins that host to the preset from then on.
+
+        This is the "mirror, but fall back to a preset" behaviour: some origins
+        select a TLS 1.2 cipher httpcloak can't complete for a mirrored iOS/Safari
+        fingerprint, so the handshake dies with a 502. When that happens we add one
+        of mitmcloak's own per-host rules pointing the host at the preset, then
+        replay the request through the bridge — decide() checks rules first, so the
+        retry (and every later request to that host) goes out as the preset.
+        """
+        import re  # pylint: disable=import-outside-toplevel
+        from mitmproxy import flowfilter  # pylint: disable=import-outside-toplevel
+        from mitmcloak.resolve import Rule  # pylint: disable=import-outside-toplevel
+
+        original = bridge.request
+        pinned: set[str] = set()
+        bridge._cloak_pinned = pinned          # so configure() can clear it
+
+        def looks_like_handshake_failure(flow: Any) -> bool:
+            r = getattr(flow, "response", None)
+            if r is None or r.status_code != 502:
+                return False
+            try:
+                body = (r.get_text(strict=False) or "")
+            except Exception:  # pylint: disable=broad-except
+                return False
+            return "tls_handshake" in body or "crypto/rsa" in body or "invalid signature" in body
+
+        async def request(flow: Any) -> None:
+            await original(flow)
+            if self.mode != "fallback" or not getattr(flow, "live", True):
+                return
+            host = flow.request.pretty_host
+            if host in pinned:                 # already using the preset for this host
+                return
+            if not looks_like_handshake_failure(flow):
+                return
+            # pin the host to the preset and retry through the bridge's own logic
+            try:
+                matcher = flowfilter.parse("~d " + re.escape(host))
+                bridge.resolver.rules.append(
+                    Rule(matcher=matcher, preset=self.preset, source=f"cloak-fallback:{host}"))
+            except Exception as exc:  # pylint: disable=broad-except
+                LOG.warning("couldn't pin %s to the fallback preset: %s", host, exc)
+                return
+            pinned.add(host)
+            LOG.info("mirror failed for %s — falling back to preset %s", host, self.preset)
+            flow.response = None               # let the bridge answer again, now as preset
+            await original(flow)
+
+        bridge.request = request
+
     async def start(self, *, port: int = 0, ports: Any = None, mode: str = "",
                     preset: str = "", allow_hosts: Optional[str] = None) -> dict[str, Any]:
         """Start, or apply the settings to a proxy that is already running.
@@ -231,6 +293,7 @@ class ProxyManager:
 
         from mitmcloak import Bridge  # pylint: disable=import-outside-toplevel
         self.bridge = Bridge()
+        self._install_fallback(self.bridge)
         self._labels.clear()
         # Order matters. The cloak's bridge performs the upstream request itself, so
         # a rewrite registered after it would be recorded as a "hit" and still go out
@@ -238,7 +301,7 @@ class ProxyManager:
         # history showing exactly what left the machine.
         self.master.addons.add(self.rules, self.bridge, self.recorder)
         # the cloak's options only exist once its addon is loaded
-        update: dict[str, Any] = {"mitmcloak_mode": self.mode,
+        update: dict[str, Any] = {"mitmcloak_mode": self._cloak_mode(),
                                   "mitmcloak_preset": self.preset,
                                   "mitmcloak_verify": self.verify_upstream}
         if self.allow_hosts.strip():
@@ -352,9 +415,18 @@ class ProxyManager:
         if verify_upstream is not None:
             self.verify_upstream = bool(verify_upstream)
 
+        # A change of mode or preset invalidates the hosts we auto-pinned to the
+        # old fallback preset — drop those rules so they don't linger.
+        if (mode is not None or preset is not None) and self.bridge is not None:
+            pinned = getattr(self.bridge, "_cloak_pinned", None)
+            if pinned:
+                self.bridge.resolver.rules = [r for r in self.bridge.resolver.rules
+                                              if not r.source.startswith("cloak-fallback:")]
+                pinned.clear()
+
         if self.master is not None:
             self.error = ""
-            update: dict[str, Any] = {"mitmcloak_mode": self.mode,
+            update: dict[str, Any] = {"mitmcloak_mode": self._cloak_mode(),
                                       "mitmcloak_preset": self.preset,
                                       "mitmcloak_verify": self.verify_upstream}
             if allow_hosts is not None:

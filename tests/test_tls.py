@@ -177,3 +177,52 @@ def test_a_user_agent_name_is_not_cached_against_the_handshake():
     second = pm.preset_label("mc-abc123", _FakeFlow("Dart/3.3 (dart:io)"))
     assert first == ("okhttp/4.12.0", "ua")
     assert second == ("Dart/3.3", "ua")
+
+
+def test_fallback_mode_retries_a_failed_mirror_with_the_preset():
+    """'fallback' mode: a mirror that fails the upstream handshake is retried once
+    with the preset, and the host is pinned so later requests skip straight to it."""
+    import asyncio
+    from mitmproxy.test import tflow, tutils
+
+    class Resp:
+        def __init__(self, status, body): self.status_code = status; self._b = body
+        def get_text(self, strict=True): return self._b
+
+    class Bridge:
+        """Fails the first (mirror) attempt; on the retry, honours the resolver so
+        the pinned rule decides — exactly what the real bridge does."""
+        def __init__(self): self.resolver = __import__(
+            "mitmcloak.resolve", fromlist=["Resolver"]).Resolver(); self.calls = 0
+        async def request(self, flow):
+            self.calls += 1
+            if self.calls == 1:
+                flow.response = Resp(502, "mitmcloak: tls_handshake auth.uber.com [h1]: "
+                                          "tls: invalid signature: crypto/rsa: verification error")
+            else:
+                d = self.resolver.decide(flow, "auto", lambda: None, "chrome-151")
+                flow.response = Resp(200 if d.reason == "rule" else 502, d.reason)
+
+    async def go():
+        pm = ProxyManager(lambda *a: None)
+        pm.mode = "fallback"; pm.preset = "chrome-151"
+        b = Bridge(); pm.bridge = b
+        pm._install_fallback(b)
+        flow = tflow.tflow(req=tutils.treq(host="auth.uber.com", port=443))
+        flow.live = True
+        await b.request(flow)
+        assert b.calls == 2                                    # failed, then retried
+        assert flow.response.status_code == 200               # retry used the rule -> preset
+        assert any(r.source == "cloak-fallback:auth.uber.com" for r in b.resolver.rules)
+        again = tflow.tflow(req=tutils.treq(host="auth.uber.com", port=443))
+        assert b.resolver.decide(again, "auto", lambda: None, "chrome-151").reason == "rule"
+
+    asyncio.run(go())
+
+
+def test_fallback_mode_maps_to_mitmcloak_auto():
+    pm = ProxyManager(lambda *a: None)
+    pm.mode = "fallback"
+    assert pm._cloak_mode() == "auto"      # mitmcloak never sees our own mode name
+    pm.mode = "static"
+    assert pm._cloak_mode() == "static"
