@@ -96,7 +96,8 @@ class ProxyHandler(Base):
             self.send(await self.proxy.configure(mode=body.get("mode"),
                                                  preset=body.get("preset"),
                                                  allow_hosts=body.get("allow_hosts"),
-                                                 ports=body.get("ports")))
+                                                 ports=body.get("ports"),
+                                                 verify_upstream=body.get("verify_upstream")))
         elif action == "stop":
             self.send(await self.proxy.stop())
         else:

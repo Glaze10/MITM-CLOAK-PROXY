@@ -128,6 +128,11 @@ class ProxyManager:
         self.mode = DEFAULT_MODE
         self.preset = DEFAULT_PRESET
         self.allow_hosts = ""
+        # This is an interception proxy, so upstream cert verification is off by
+        # default: Apple's App Attest and other private-CA endpoints chain to
+        # roots no public bundle has, and verifying would 502 them. The UI can
+        # turn it back on.
+        self.verify_upstream = False
         self.error: str = ""
         self.notices = Notices()
         self.bridge: Any = None
@@ -178,6 +183,7 @@ class ProxyManager:
             "mode": self.mode,
             "preset": self.preset,
             "allow_hosts": self.allow_hosts,
+            "verify_upstream": self.verify_upstream,
             "lan_ip": lan_address(),
             "presets": available_presets(),
             "flows": len(self.recorder.flows),
@@ -233,7 +239,8 @@ class ProxyManager:
         self.master.addons.add(self.rules, self.bridge, self.recorder)
         # the cloak's options only exist once its addon is loaded
         update: dict[str, Any] = {"mitmcloak_mode": self.mode,
-                                  "mitmcloak_preset": self.preset}
+                                  "mitmcloak_preset": self.preset,
+                                  "mitmcloak_verify": self.verify_upstream}
         if self.allow_hosts.strip():
             update["allow_hosts"] = [h.strip() for h in self.allow_hosts.split(",") if h.strip()]
         try:
@@ -324,8 +331,8 @@ class ProxyManager:
         return answer
 
     async def configure(self, *, mode: Optional[str] = None, preset: Optional[str] = None,
-                        allow_hosts: Optional[str] = None,
-                        ports: Any = None) -> dict[str, Any]:
+                        allow_hosts: Optional[str] = None, ports: Any = None,
+                        verify_upstream: Optional[bool] = None) -> dict[str, Any]:
         """Change the identity without restarting anything.
 
         The cloak reads its mode and preset from the options on every request, and
@@ -342,11 +349,14 @@ class ProxyManager:
             self.allow_hosts = allow_hosts
         if ports is not None:
             self.ports = self._clean_ports(ports, self.ports)
+        if verify_upstream is not None:
+            self.verify_upstream = bool(verify_upstream)
 
         if self.master is not None:
             self.error = ""
             update: dict[str, Any] = {"mitmcloak_mode": self.mode,
-                                      "mitmcloak_preset": self.preset}
+                                      "mitmcloak_preset": self.preset,
+                                      "mitmcloak_verify": self.verify_upstream}
             if allow_hosts is not None:
                 update["allow_hosts"] = [h.strip() for h in self.allow_hosts.split(",")
                                          if h.strip()]

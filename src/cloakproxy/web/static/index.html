@@ -185,6 +185,13 @@
           <label class="field"><span>Only these hosts</span>
             <input id="setAllow" placeholder="comma separated, blank for all">
           </label>
+          <label class="switch" style="margin:2px 0 6px">
+            <input type="checkbox" id="setVerify">
+            <span>Verify upstream certificates</span>
+          </label>
+          <p class="hint">Off by default — an interception proxy usually wants it off.
+            On, endpoints with a private CA (Apple App&nbsp;Attest, some pinned APIs)
+            fail with “unknown authority”.</p>
           <p class="hint">Point the device's HTTP proxy at
             <button class="addr" id="proxyAddr" title="Copy">—</button></p>
         </section>

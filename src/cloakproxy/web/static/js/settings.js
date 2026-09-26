@@ -70,6 +70,7 @@ export async function refreshCloakStats() {
 export function paintSettings(s = state.proxy) {
   paintPorts(s);
   $("#setAllow").value = s.allow_hosts || "";
+  $("#setVerify").checked = !!s.verify_upstream;
   // A pinned fingerprint is often one mirrored from a device, which isn't in the
   // built-in list — it still has to appear here, or the control would name a
   // different identity than the one actually going out.
@@ -140,6 +141,7 @@ async function applyListener(patch = {}) {
     mode: $('#modeChoices input:checked')?.value || "auto",
     preset: $("#setPreset").value,
     allow_hosts: $("#setAllow").value,
+    verify_upstream: $("#setVerify").checked,
     ...patch,
   };
   if (!body.ports.length) return toast("Keep at least one port", true);
@@ -282,6 +284,7 @@ export function initSettings() {
   });
   $("#setPreset").onchange = () => applyIdentity();
   $("#setAllow").onchange = () => applyListener();
+  $("#setVerify").onchange = () => applyListener();
   initPorts();
 
   $("#btnCert").onclick = async () => {
