@@ -14,8 +14,8 @@
 param(
   [int]$Port = 8080,
   [int]$UiPort = 8099,
-  [ValidateSet('auto','mirror','static')][string]$Mode = 'auto',
-  [string]$Preset = 'ios-safari-18',
+  [ValidateSet('fallback','auto','mirror','static')][string]$Mode = 'fallback',
+  [string]$Preset = 'chrome-151',
   [switch]$NoWindow,
   [switch]$NoStart,
   [switch]$Console,                   # stay attached: logs in this terminal

@@ -23,8 +23,12 @@ from cloakproxy.core.rules import MatchReplace
 LOG = logging.getLogger("cloak")
 
 DEFAULT_PORT = 8080
-DEFAULT_MODE = "auto"          # auto | mirror | static  (see mitmcloak)
-DEFAULT_PRESET = "ios-safari-18"
+DEFAULT_MODE = "fallback"      # fallback | auto | mirror | static  (see mitmcloak)
+# The fallback preset: used when a mirrored handshake fails upstream. It must be
+# one httpcloak can actually complete, so NOT an iOS/Safari fingerprint (those
+# offer TLS 1.2 ciphers httpcloak can't finish — the auth.uber.com 502). Chrome
+# completes everywhere, which is what makes it a safe fallback.
+DEFAULT_PRESET = "chrome-151"
 
 
 def lan_address() -> str:

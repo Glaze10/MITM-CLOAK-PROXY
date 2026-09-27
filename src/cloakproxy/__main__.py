@@ -264,7 +264,8 @@ def main(argv: list[str] | None = None) -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", type=int, default=DEFAULT_PORT, help="proxy port")
     ap.add_argument("--ui-port", type=int, default=UI_PORT, help="UI port")
-    ap.add_argument("--mode", default=DEFAULT_MODE, choices=("auto", "mirror", "static"))
+    ap.add_argument("--mode", default=DEFAULT_MODE,
+                    choices=("fallback", "auto", "mirror", "static"))
     ap.add_argument("--preset", default=DEFAULT_PRESET, help="fallback/static fingerprint")
     ap.add_argument("--no-start", dest="start", action="store_false",
                     help="open the UI without starting the proxy")
