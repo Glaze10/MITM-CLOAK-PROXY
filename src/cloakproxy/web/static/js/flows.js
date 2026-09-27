@@ -99,6 +99,8 @@ let ROW_H = 24;                    // measured after the first real row exists
 let spacerTop, spacerBottom;
 let freshId = null;                // the one row that just arrived live
 let scheduled = false;
+let followWanted = false;          // stick to the bottom on the next frame
+let detailDirtyId = null;          // the open detail needs a redraw on the next frame
 
 function ensureSpacers() {
   const body = $("#rows");
@@ -147,7 +149,6 @@ function paintCounts() {
 let lastStart = -1, lastEnd = -1, lastTotal = -1;
 
 function paint(force) {
-  scheduled = false;
   const body = $("#rows");
   const pane = $("#flowPane");
   ensureSpacers();
@@ -194,7 +195,31 @@ function paint(force) {
 function schedulePaint() {
   if (scheduled) return;
   scheduled = true;
-  requestAnimationFrame(paint);
+  requestAnimationFrame(frame);
+}
+
+/* One rendering pass per animation frame. Live traffic fires a WebSocket event
+   for every request AND every response — hundreds a second when a phone is
+   loading apps. If each one painted synchronously (as it used to), the JS
+   thread never returns to the event loop, the window stops pumping messages,
+   and Windows paints "Not Responding". Coalescing every upsert in a frame into
+   a single paint here is what keeps the thread free. */
+function frame() {
+  scheduled = false;
+  const t0 = performance.now();
+  paint();
+  if (followWanted) {                       // one scroll-to-bottom, not one per event
+    followWanted = false;
+    const pane = $("#flowPane");
+    pane.scrollTop = pane.scrollHeight;
+    paint();                                // re-slice at the new position
+  }
+  if (detailDirtyId != null) {              // refresh the open flow once, if it changed
+    const id = detailDirtyId; detailDirtyId = null;
+    if (state.detail && state.detail.id === id) showDetail(id);
+  }
+  const ms = performance.now() - t0;
+  if (ms > 60) console.warn(`[paint] frame took ${ms.toFixed(0)}ms (${state.order.length} rows)`);
 }
 
 export function renderFlows() { paint(); }
@@ -223,10 +248,12 @@ export function setFlows(rows) {
 
 export function upsertFlow(f) {
   const known = state.flows.has(f.id);
+  // Whether we were pinned to the bottom, read before the row lands. This is a
+  // layout read, but with painting deferred to the frame we don't write the DOM
+  // between events, so repeated reads stay cheap (layout isn't re-dirtied).
+  const stick = state.prefs.follow && atBottom($("#flowPane"));
   const merged = { ...(state.flows.get(f.id) || {}), ...f };
   state.flows.set(f.id, merged);
-  const pane = $("#flowPane");
-  const was = atBottom(pane);
   if (!known) {
     state.order.push(f.id);
     freshId = f.id;
@@ -240,9 +267,12 @@ export function upsertFlow(f) {
       rowEls.delete(gone);
     }
   }
-  paint();
-  if (state.prefs.follow && was) { pane.scrollTop = pane.scrollHeight; paint(); }
-  if (state.detail && state.detail.id === f.id) showDetail(f.id);
+  // Hand the work to the next frame instead of painting now: a burst of events
+  // collapses into one paint, one scroll, one detail refresh. This is the fix
+  // for the window going "Not Responding" under live traffic.
+  if (stick) followWanted = true;
+  if (state.detail && state.detail.id === f.id) detailDirtyId = f.id;
+  schedulePaint();
 }
 
 /* ── loading ─────────────────────────────────────────────────────────── */
