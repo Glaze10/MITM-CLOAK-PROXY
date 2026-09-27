@@ -110,9 +110,10 @@ function initHistoryBar() {
     const many = ids.length > 1;
     const name = many ? "cloak-selection.har" : "cloak.har";
     const url = many ? `/api/har?name=${name}&ids=${ids.join(",")}` : `/api/har?name=${name}`;
-    // fetch the HAR, then hand it to the window's Save dialog (or the browser)
-    const text = await fetch(url).then((r) => r.text());
-    await saveText(name, text, url);
+    // Hand the URL to the save layer — in the desktop window Python fetches and
+    // streams it (a full export is too big to pull into a JS string / the bridge);
+    // in a browser it downloads directly. Don't pre-fetch it here.
+    await saveText(name, null, url);
   };
   $("#btnImport").onclick = async () => {
     const path = await pickFile();

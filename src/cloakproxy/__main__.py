@@ -52,6 +52,7 @@ class Bridge:
 
     def __init__(self) -> None:
         self.window = None
+        self.base_url = ""      # the local UI origin, for resolving relative save_url paths
 
     def save_file(self, suggested_name: str, text: str) -> dict:
         """Write text to a location the user picks. Returns the path, or {}."""
@@ -64,6 +65,31 @@ class Bridge:
         try:
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(text)
+            return {"ok": True, "path": path}
+        except Exception as exc:  # pylint: disable=broad-except
+            return {"ok": False, "error": str(exc)}
+
+    def save_url(self, suggested_name: str, url: str) -> dict:
+        """Save the content at a local URL to a user-picked path, streamed in Python.
+
+        A full-capture HAR export is hundreds of MB; pulling that into a JS string
+        and passing it across the pywebview bridge to save_file() silently chokes
+        (the export button "does nothing"). Fetching it here keeps the payload out
+        of the bridge entirely — the page only ever passes the short URL.
+        """
+        import shutil            # pylint: disable=import-outside-toplevel
+        import urllib.request    # pylint: disable=import-outside-toplevel
+        import webview           # pylint: disable=import-outside-toplevel
+        from urllib.parse import urljoin  # pylint: disable=import-outside-toplevel
+        result = self.window.create_file_dialog(
+            webview.SAVE_DIALOG, save_filename=suggested_name)
+        if not result:
+            return {"ok": False, "cancelled": True}
+        path = result[0] if isinstance(result, (list, tuple)) else result
+        full = urljoin(self.base_url or "http://127.0.0.1/", url)
+        try:
+            with urllib.request.urlopen(full, timeout=300) as resp, open(path, "wb") as fh:
+                shutil.copyfileobj(resp, fh, length=1024 * 256)
             return {"ok": True, "path": path}
         except Exception as exc:  # pylint: disable=broad-except
             return {"ok": False, "error": str(exc)}
@@ -130,6 +156,7 @@ def _window(url: str, port: int) -> bool:
     _make_dpi_aware()
     _claim_taskbar_identity()
     bridge = Bridge()
+    bridge.base_url = url          # so save_url can resolve relative export paths
     # Start on a tiny inline splash rather than the app URL. WebView2's first
     # paint is the slow part; a self-contained page paints the instant the
     # runtime is up (no fetch, no modules), so the window shows the loading

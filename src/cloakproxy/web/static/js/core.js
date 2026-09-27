@@ -145,13 +145,24 @@ export const host = () =>
 export async function saveText(name, text, url) {
   const api = host();
   if (api) {
-    const r = await api.save_file(name, text);
+    // Prefer letting Python fetch the URL and stream it to disk. A big export (a
+    // full-capture HAR is hundreds of MB) can't cross the JS bridge as a string —
+    // that's what made the export button do nothing. save_file stays for content
+    // the page already holds and no URL exists for.
+    if (url && api.save_url) {
+      const r = await api.save_url(name, url);
+      if (r && r.ok) toast(`Saved to ${r.path}`);
+      else if (r && r.error) toast(r.error, true);
+      return;
+    }
+    if (text == null && url) text = await fetch(url).then((r) => r.text());
+    const r = await api.save_file(name, text || "");
     if (r && r.ok) toast(`Saved to ${r.path}`);
     else if (r && r.error) toast(r.error, true);
     return;
   }
   if (url) { window.location = url; return; }        // browser: let it download
-  const blob = new Blob([text], { type: "application/octet-stream" });
+  const blob = new Blob([text || ""], { type: "application/octet-stream" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob); a.download = name; a.click();
   URL.revokeObjectURL(a.href);
